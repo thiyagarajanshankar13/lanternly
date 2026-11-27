@@ -1,0 +1,51 @@
+<!-- title: Monitoring | desc: Uptime, speed, version and certificate checks for every service and for sites hosted elsewhere, with labels, history and email alerts. -->
+<p class="lead">Every service with a web address is checked every few minutes, and you can add sites hosted anywhere else. Lanternly records whether each one is up, how fast it answers, its version and when its certificate runs out, and emails you when something changes.</p>
+
+<h2>What's checked</h2>
+<p>Each check asks <code>&lt;site&gt;/api/health</code> if the site has one, else its home page (or the health page you set). For each site the Monitoring page shows:</p>
+<ul>
+<li><strong>Status</strong>: Up, Down, or Retrying (one check failed; a site only counts as down after two failures in a row).</li>
+<li><strong>Speed</strong>: how long it took to answer.</li>
+<li><strong>Up, 7 days</strong>: the share of checks that passed in the last week.</li>
+<li><strong>Version</strong>: if the health page reports one (<code>{"version": "1.4.0"}</code>).</li>
+<li><strong>Certificate</strong>: days until the HTTPS certificate runs out.</li>
+</ul>
+<p>Sites that are down are listed first, and the page refreshes by itself. Paused services and services still being created aren't checked.</p>
+
+<h2>Watch a site hosted elsewhere</h2>
+<ol class="steps">
+<li>Under <strong>Watch a site hosted elsewhere</strong>, type its address, such as <code>https://www.example.org</code>.</li>
+<li>Optionally give it a name.</li>
+<li>Press <strong>Add and check</strong>. The first check runs straight away.</li>
+</ol>
+<p>Nothing needs installing on that site. Lanternly only watches it; it can't restart or change a site it doesn't run. Private and loopback addresses are refused, so monitoring can't be used to probe your own network.</p>
+
+<h3>User numbers from outside sites</h3>
+<p>A site can also report how many users it has. If it exposes <code>/api/health/stats</code> behind a key, open it on the Monitoring page, scroll to <strong>Settings</strong>, set the same value as the site's <code>STATS_API_KEY</code> under <strong>Key for user numbers</strong> and press <strong>Save</strong>. Lanternly reads the numbers once an hour, only counts, never names or emails.</p>
+
+<h2>Labels and groups</h2>
+<p>Labels sort sites into groups, such as <strong>Production</strong> and <strong>Staging</strong>, or one label per client.</p>
+<ol class="steps">
+<li>Press <strong>Edit</strong> at the end of a site's row.</li>
+<li>Under <strong>Labels</strong>, pick a label or type a new one and press <kbd class="k">Enter</kbd>. A site can have several.</li>
+<li>Press <strong>Save</strong>.</li>
+</ol>
+<ul>
+<li>Each label gets its own table with its own up, down and behind counts; sites without one are under <strong>No label</strong>.</li>
+<li><strong>Group by labels / One list</strong> switches between tables and a single list with tags.</li>
+<li>Click label tags to show only some groups. The browser address keeps your choice, so you can bookmark it.</li>
+<li><strong>Labels</strong> in the toolbar renames, recolours, orders and deletes labels.</li>
+</ul>
+
+<h2>A site's history</h2>
+<p>Click a site for uptime over 24 hours and 7 days, its usual speed and the latest checks (kept 14 days). From there you can rename it, change its address or labels, <strong>pause checks and alerts</strong> during planned work, or <strong>stop watching</strong> it.</p>
+
+<h2>Alerts</h2>
+<p>An email goes out when:</p>
+<ul>
+<li>a site is down (two failed checks in a row),</li>
+<li>it's back up, with how long it was down,</li>
+<li>a certificate has 14 days left, and again at 3 days.</li>
+</ul>
+<p>Under <strong>Alerts</strong>, type who should get them (comma-separated). Empty means every owner. <strong>Save and send a test email</strong> checks delivery. You can also set how often sites are checked (1 to 60 minutes).</p>
+<p>The same addresses get database quota, backup and (with the AWS plugin) cost alerts. All of them need the outgoing email account under <strong>Settings</strong>.</p>

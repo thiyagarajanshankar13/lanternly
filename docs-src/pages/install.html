@@ -1,0 +1,94 @@
+<!-- title: Install on your servers | desc: Set up Lanternly on two Ubuntu 24.04 VMs: DNS, the deployer VM, a services VM, first sign-in and your first app. -->
+<p class="lead">A production install is two Ubuntu VMs: a small one that runs the console, and one or more that run your services. Plan on 15 to 30 minutes.</p>
+
+<h2>Before you start</h2>
+<div class="table"><table>
+<tr><th>You need</th><th>Notes</th></tr>
+<tr><td>Deployer VM</td><td>Ubuntu 24.04, 2 GB RAM, static IP, ports 22, 80 and 443 open.</td></tr>
+<tr><td>Services VM</td><td>Ubuntu 24.04, 4 GB RAM or more, static IP, ports 22, 80 and 443 open. You can add more later.</td></tr>
+<tr><td>A domain</td><td>One you can add DNS records to. The examples use <code>example.com</code>.</td></tr>
+<tr><td>An email address</td><td>For Let's Encrypt certificate notices.</td></tr>
+<tr><td>Optional</td><td>A GitHub account (apps from repos), an S3-compatible bucket (backups), an SMTP account (alerts and invites by email).</td></tr>
+</table></div>
+<p>Any provider works: AWS (EC2 or Lightsail), Google Cloud, Hetzner, Vultr, DigitalOcean or your own hardware. If you use AWS, the <a href="aws.html">AWS plugin</a> can create later services VMs for you.</p>
+
+<h2>1. Point your DNS</h2>
+<p>Add two records at your DNS provider:</p>
+<div class="table"><table>
+<tr><th>Name</th><th>Type</th><th>Value</th><th>What it's for</th></tr>
+<tr><td><code>admin.example.com</code></td><td>A</td><td>Deployer VM's IP</td><td>The console</td></tr>
+<tr><td><code>*.example.com</code></td><td>A</td><td>Services VM's IP</td><td>Every service's address, such as <code>shop.example.com</code></td></tr>
+</table></div>
+<p>The wildcard means new services get an address without a DNS change. You can use any subdomain for the console; <code>admin.</code> is only an example.</p>
+
+<h2>2. Set up the deployer VM</h2>
+<p>Copy the <code>deploy/</code> folder from the repo to the VM and run the setup script as root:</p>
+<pre><code>scp -r deploy ubuntu@admin.example.com:
+ssh ubuntu@admin.example.com
+cd deploy
+sudo DEPLOYER_DOMAIN=admin.example.com ./setup-deployer-vm.sh</code></pre>
+<p>It installs Docker, creates the console's SSH key and secrets in <code>/opt/deployer</code> (never printed again), writes Caddy's config, and prints three things. <strong>Keep them for the next steps:</strong></p>
+<ul>
+<li>the deployer's <strong>SSH public key</strong> (for the services VM),</li>
+<li>this VM's <strong>host key</strong>,</li>
+<li>a one-time <strong>setup code</strong> for the first sign-in. To choose your own, pass <code>DEPLOYER_SETUP_TOKEN</code> (16+ letters and digits) to the script.</li>
+</ul>
+<p>Then start the console. Either build it on the VM:</p>
+<pre><code>git clone https://github.com/thiyagarajanshankar13/lanternly.git
+cd lanternly && sudo docker build -t deployer .
+cd /opt/deployer && sudo env DEPLOYER_IMAGE=deployer docker compose up -d</code></pre>
+<p>or let GitHub Actions build and deliver it (see <a href="#deploy-from-github-actions">Deploy from GitHub Actions</a> below).</p>
+
+<h2>3. Set up a services VM</h2>
+<p>Copy the <code>agent/</code> folder to the services VM and run its setup with the public key from step 2:</p>
+<pre><code>scp -r agent ubuntu@&lt;services-vm&gt;:
+ssh ubuntu@&lt;services-vm&gt;
+cd agent
+sudo DEPLOYER_PUBLIC_KEY="ssh-ed25519 AAAA… deployer" \
+     ACME_EMAIL=you@example.com \
+     AGENT_ROOT=/opt/lanternly AGENT_NAMESPACE=lanternly \
+     ./setup-clubs-vm.sh</code></pre>
+<p>It installs Docker, adds swap, starts Caddy and the <code>clubctl</code> tool, and creates a <code>deployer</code> user whose SSH key can run <code>clubctl</code> and nothing else. At the end it prints this VM's <strong>host key</strong>.</p>
+<ul>
+<li><code>AGENT_ROOT</code> and <code>AGENT_NAMESPACE</code> choose the folder and the container name prefix. They can't be changed once the server has services. If you leave them out, the defaults are <code>/opt/avrosphere</code> and <code>avrosphere</code> (names from the project Lanternly was extracted from).</li>
+<li>If your app images are private on ghcr.io, also pass <code>GHCR_USER</code> and <code>GHCR_TOKEN</code> (a token with <code>read:packages</code>).</li>
+</ul>
+<div class="warn"><b class="t">Close SSH to everyone else</b><p>Once it works, limit port 22 on the services VM to the deployer VM's IP in your provider's firewall. The console is the only thing that needs to reach it.</p></div>
+
+<h2>4. Sign in for the first time</h2>
+<ol class="steps">
+<li>Open <code>https://admin.example.com/admin</code>. The certificate is issued on the first visit, so give it a few seconds.</li>
+<li>Enter the setup code, your name, email and a password (12 characters or more).</li>
+<li>Scan the QR code with an authenticator app and enter the 6-digit code.</li>
+<li>On the deployer VM, remove the <code>DEPLOYER_SETUP_TOKEN</code> line from <code>/opt/deployer/.env</code> and restart: <code>cd /opt/deployer &amp;&amp; sudo docker compose up -d</code>.</li>
+</ol>
+
+<h2>5. Connect the console to your server</h2>
+<ol class="steps">
+<li><strong>Settings → Edit settings</strong>: set <strong>Domain services live under</strong> to <code>example.com</code>. Fill in <strong>Outgoing email</strong> now if you have an SMTP account (needed for alerts and emailed invites).</li>
+<li><strong>Servers → Add existing server</strong>: the services VM's address for SSH, its public IP, the host key printed by its setup, and its RAM. See <a href="servers.html">Servers</a>.</li>
+<li><strong>Settings → GitHub</strong> → <strong>Connect GitHub</strong> if you'll deploy from repos. See <a href="github-apps.html#connect-github">Connect GitHub</a>.</li>
+<li><strong>Backups</strong>: add your bucket. See <a href="backups.html">Backups</a>.</li>
+</ol>
+<p>Now create a project and your first service: <strong>Projects → New project → New service</strong>.</p>
+
+<h2>Deploy from GitHub Actions</h2>
+<p>The repo includes workflows that do the server work for you. Fork or copy the repo into your own GitHub account first.</p>
+<h3>Set up a VM</h3>
+<p><code>.github/workflows/setup-vm.yml</code> runs steps 2 and 3 over SSH from GitHub Actions. Add these under your repo's <strong>Settings → Secrets and variables → Actions</strong>, then run it from <strong>Actions → Set up a VM</strong>:</p>
+<div class="table"><table>
+<tr><th>Kind</th><th>Name</th><th>Value</th></tr>
+<tr><td>secret</td><td><code>DEPLOYER_VM_SSH_KEY</code></td><td>Private key that can SSH to the deployer VM</td></tr>
+<tr><td>secret</td><td><code>DEPLOYER_SETUP_TOKEN</code></td><td>A code you make up (16+ letters and digits), typed once at the first sign-in</td></tr>
+<tr><td>variable</td><td><code>DEPLOYER_VM_HOST</code></td><td>The deployer VM's address</td></tr>
+<tr><td>variable</td><td><code>DEPLOYER_VM_USER</code></td><td>SSH user (default <code>ubuntu</code>)</td></tr>
+<tr><td>variable</td><td><code>DEPLOYER_DOMAIN</code></td><td><code>admin.example.com</code></td></tr>
+<tr><td>secret</td><td><code>SITES_VM_SSH_KEY</code></td><td>Private key that can SSH to the services VM</td></tr>
+<tr><td>variable</td><td><code>SITES_VM_HOST</code>, <code>SITES_VM_USER</code></td><td>The services VM's address and SSH user</td></tr>
+<tr><td>variable</td><td><code>ACME_EMAIL</code></td><td>Email for certificate notices</td></tr>
+<tr><td>secret / variable</td><td><code>GHCR_READ_TOKEN</code> / <code>GHCR_USER</code></td><td>Optional: lets the services VM pull private ghcr.io images</td></tr>
+<tr><td>variable</td><td><code>DEPLOYER_VM_HOST_KEY</code>, <code>SITES_VM_HOST_KEY</code></td><td>Optional. On a first run the key the VM presents is accepted and shown in the run summary; save it here to enforce it from then on.</td></tr>
+</table></div>
+<p>It's safe to run again: it also updates <code>clubctl</code> on the services VM after a change to <code>agent/</code>.</p>
+<h3>Deploy the deployer</h3>
+<p><code>.github/workflows/deploy-deployer.yml</code> builds the console image on every push to <code>main</code> and delivers it to the deployer VM. It needs the secret <code>DEPLOYER_VM_SSH_KEY</code> and the variable <code>DEPLOYER_VM_HOST</code>.</p>

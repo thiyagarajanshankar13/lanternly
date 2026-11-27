@@ -1,0 +1,153 @@
+<!-- title: Amazon Web Services plugin | desc: The AWS plugin creates and deletes Lightsail servers from the console and shows what AWS charges in your currency, with budget alerts, credits and a per-project estimate. -->
+<p class="lead">The AWS plugin adds two things for people who host on Amazon: <strong>Create server</strong>, which makes a Lightsail VM that sets itself up and joins your servers, and <strong>Costs</strong>, which shows what AWS charges in the currency you choose.</p>
+
+<p>Everything else in Lanternly works on AWS without this plugin: EC2 or Lightsail VMs added by hand, S3 or Lightsail buckets for backups. The plugin only adds convenience.</p>
+
+<h2>Turn it on</h2>
+<p><strong>Settings → Plugins → Manage plugins → Amazon Web Services</strong>. It's off on a new install. Turning it off later hides Costs, Create server, AWS for new servers and Check Lightsail, and stops the cost timer. Servers it made stay listed and can still be deleted.</p>
+<p>The plugin uses two separate AWS keys, each with the least it needs:</p>
+<div class="table"><table>
+<tr><th>Key</th><th>Used for</th><th>Can it change things?</th></tr>
+<tr><td>Costs key (for example IAM user <code>lanternly-costs</code>)</td><td>Reading Cost Explorer, Free Tier and Lightsail plan prices</td><td>Only the one AWS budget the console keeps</td></tr>
+<tr><td>Servers key (for example <code>lanternly-provision</code>)</td><td>Creating and deleting Lightsail VMs</td><td>Only VMs it tagged as its own, in one region</td></tr>
+</table></div>
+
+<h2>Costs</h2>
+<p><strong>Costs</strong> in the side menu (owners only) shows:</p>
+<ul>
+<li><strong>This month so far</strong>, the <strong>forecast</strong> for the month and <strong>last month</strong>.</li>
+<li><strong>What you pay each day</strong> for the last 31 days (UTC days, as AWS counts them; today is still counting).</li>
+<li><strong>By AWS service</strong> after credits, and a breakdown of <strong>Lightsail</strong>: VMs, buckets, static IPs, data transfer, snapshots, databases and load balancers.</li>
+<li><strong>Credits and free tier</strong>: charges, credits and what you actually paid each month, credits left and when they'll run out at the current pace, and free tier use this month.</li>
+<li><strong>Each project, a month (estimate)</strong>: each server's plan price shared between the projects running on it. Also shown on the Projects pages.</li>
+</ul>
+<p>Numbers are fetched once a day (and again 3 hours after a failure), or when you press <strong>Refresh now</strong>.</p>
+
+<h3>Connect AWS for costs</h3>
+<ol class="steps">
+<li>In the AWS console, <strong>Billing → Cost Explorer</strong>: turn it on if it isn't. The first numbers take up to a day.</li>
+<li><strong>Account → IAM user and role access to Billing information</strong>: turn it on.</li>
+<li><strong>IAM → Users → Create user</strong> (for example <code>lanternly-costs</code>, no console access). Add the policy below as an inline policy.</li>
+<li>On the user, <strong>Security credentials → Create access key</strong> ("Application running outside AWS").</li>
+<li>On <strong>Costs → Connect AWS</strong>, paste both parts and the Lightsail region your servers are in (for example <code>eu-central-1</code>), and save.</li>
+</ol>
+<pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "ReadCosts", "Effect": "Allow",
+      "Action": ["ce:GetCostAndUsage", "ce:GetCostForecast"], "Resource": "*" },
+    { "Sid": "ReadCreditsAndFreeTier", "Effect": "Allow",
+      "Action": ["freetier:GetFreeTierUsage", "freetier:GetAccountPlanState"], "Resource": "*" },
+    { "Sid": "ReadLightsailPlans", "Effect": "Allow",
+      "Action": ["lightsail:GetInstances", "lightsail:GetBundles",
+                 "lightsail:GetBuckets", "lightsail:GetBucketBundles"], "Resource": "*" },
+    { "Sid": "KeepOneBudget", "Effect": "Allow",
+      "Action": ["budgets:ViewBudget", "budgets:ModifyBudget"],
+      "Resource": "arn:aws:budgets::*:budget/avro-deployer-monthly" }
+  ]
+}</code></pre>
+<p>The console shows this same policy on the Costs page, so you can copy it from there. A bucket's own access key can't be used: Lightsail bucket keys only open their bucket.</p>
+<div class="note"><b class="t">What it costs</b><p>Cost Explorer charges US$0.01 per request. A daily fetch makes four or five, about US$1.20 to US$1.50 a month. Set <code>DEPLOYER_COSTS=off</code> to stop the timer.</p></div>
+
+<h3>Show money in your currency</h3>
+<p>AWS bills in US dollars. Under <strong>Costs → Budget and alerts → Show money in</strong>, pick one of:</p>
+<div class="table"><table>
+<tr><th>Code</th><th>Currency</th></tr>
+<tr><td><code>USD</code></td><td>US dollar (default; shown exactly as AWS bills)</td></tr>
+<tr><td><code>EUR</code>, <code>GBP</code></td><td>Euro, pound sterling</td></tr>
+<tr><td><code>AUD</code>, <code>NZD</code>, <code>CAD</code>, <code>SGD</code></td><td>Australian, New Zealand, Canadian and Singapore dollars</td></tr>
+<tr><td><code>INR</code></td><td>Indian rupee</td></tr>
+</table></div>
+<ul>
+<li>Other currencies are converted at the day's European Central Bank rate (from the free Frankfurter service). To match your invoice exactly, type the rate from your AWS invoice instead.</li>
+<li>If the rate service can't be reached, the last known rate is used; failing that, the page shows US$ and says so.</li>
+<li>Changing the currency fetches the numbers again. Check the budget afterwards, since it's in the chosen currency.</li>
+<li>Dates follow the locale under <strong>Settings → Branding</strong>.</li>
+</ul>
+
+<h3>Budget and alerts</h3>
+<p>Set a <strong>Monthly budget</strong> (empty = no budget, spike alerts only). The alert addresses from Monitoring get an email:</p>
+<ul>
+<li>at <strong>50%</strong>, <strong>80%</strong> and <strong>100%</strong> of the budget (each once a month),</li>
+<li>when the <strong>forecast</strong> goes over the budget (once a month),</li>
+<li>on a <strong>spike</strong>: yesterday cost more than twice the 7-day average, by a meaningful amount (about US$1.30 or more),</li>
+<li>when <strong>credits</strong> will run out or expire within 30 days.</li>
+</ul>
+<p>Without an outgoing email account, press <strong>Save as AWS budget</strong>: AWS creates a budget named <code>avro-deployer-monthly</code> and emails the same people at 80% and 100% actual, and 100% forecast.</p>
+
+<h3>Promotional credits</h3>
+<p>AWS shows credits used, but has no API for how much of a credit code (AWS Activate, a promotion) is left. Copy the balance from <strong>AWS Billing → Credits</strong> into <strong>Credits left (US$)</strong> with its expiry date; credits used from that day on are taken off it. Accounts on the AWS free plan are read automatically.</p>
+
+<h2>Create a server</h2>
+<p>Owners can make a new Lightsail VM from <strong>Servers → Create server</strong>. It takes about 10 minutes and needs nothing from you after you press the button.</p>
+<ol class="steps">
+<li>Give it a <strong>name</strong>, such as <em>Frankfurt 2</em>. The page shows the name it gets in Lightsail.</li>
+<li>Pick a <strong>size</strong>. Each shows its monthly price in your Costs currency and what all your Lightsail plans would cost with it:
+<div class="table"><table>
+<tr><th>Size</th><th>Holds about</th></tr>
+<tr><td>1 GB</td><td>one small app, never shared</td></tr>
+<tr><td>2 GB</td><td>2 services' worth of room</td></tr>
+<tr><td>4 GB</td><td>5</td></tr>
+<tr><td>8 GB (default)</td><td>10</td></tr>
+<tr><td>16 GB</td><td>20</td></tr>
+</table></div>
+Each size uses the cheapest current Lightsail Linux plan with that much memory and an IPv4 address.</li>
+<li>Press <strong>Create server</strong> and watch the steps on the page.</li>
+</ol>
+<p>The console creates an Ubuntu 24.04 VM tagged as its own, gives it a static IP, opens ports 80 and 443 to everyone and 22 only to the deployer VM (plus Lightsail's browser SSH), and the VM runs the services setup on first boot. It fetches its setup with a one-time code that only works from the VM's own IP, reports progress back, and sends its host key when done. The console then checks it can reach the server over SSH and adds it to the list as <strong>Ready</strong>.</p>
+<ul>
+<li>If a step fails, press <strong>Retry</strong>.</li>
+<li>If the VM never reports back, press <strong>Discard</strong>: the VM and its static IP are deleted so they cost nothing.</li>
+</ul>
+<h3>What can stop a create</h3>
+<ul>
+<li><strong>The limit</strong>: at most 5 servers made by the console, unless you raise it under <strong>AWS for new servers</strong>.</li>
+<li><strong>The budget</strong>: when the new server would take your monthly Lightsail plans over the Costs budget, tick <strong>Go over the budget</strong> to make it anyway.</li>
+<li><strong>Setup</strong>: the page lists anything missing: the key, an <code>https://</code> <code>DEPLOYER_URL</code>, the certificate email, the console's SSH key.</li>
+</ul>
+
+<h3>Set up AWS for new servers (once)</h3>
+<p>Open <strong>Servers → AWS for new servers</strong> and fill in:</p>
+<ul>
+<li>An <strong>access key</strong> for its own IAM user (not the costs key, which is refused), with the policy below.</li>
+<li>The <strong>region</strong> (and zone) new servers go in.</li>
+<li><strong>The deployer's public IP</strong>: the only address allowed on SSH to new servers.</li>
+<li><strong>Most servers the console may make</strong> (default 5).</li>
+<li>The <strong>email for HTTPS certificate notices</strong>.</li>
+<li>Optional: a <strong>GitHub user</strong> and <strong>package token</strong> (<code>read:packages</code>) so new servers can pull private ghcr.io images.</li>
+</ul>
+<p>The screen shows the exact policy for your region. It looks like this (for <code>eu-central-1</code>):</p>
+<pre><code>{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "Read", "Effect": "Allow", "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-central-1" } },
+      "Action": ["lightsail:GetBundles", "lightsail:GetBlueprints", "lightsail:GetRegions",
+                 "lightsail:GetInstance", "lightsail:GetInstances", "lightsail:GetStaticIp",
+                 "lightsail:GetStaticIps", "lightsail:GetInstanceSnapshot",
+                 "lightsail:GetInstanceSnapshots"] },
+    { "Sid": "CreateOnlyTagged", "Effect": "Allow", "Resource": "*",
+      "Action": ["lightsail:CreateInstances", "lightsail:TagResource"],
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-central-1",
+                                       "aws:RequestTag/avro-managed": "yes" } } },
+    { "Sid": "ChangeOnlyTagged", "Effect": "Allow", "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-central-1",
+                                       "aws:ResourceTag/avro-managed": "yes" } },
+      "Action": ["lightsail:PutInstancePublicPorts", "lightsail:CreateInstanceSnapshot",
+                 "lightsail:DeleteInstance", "lightsail:DeleteInstanceSnapshot"] },
+    { "Sid": "StaticIps", "Effect": "Allow", "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-central-1" } },
+      "Action": ["lightsail:AllocateStaticIp", "lightsail:AttachStaticIp",
+                 "lightsail:DetachStaticIp", "lightsail:ReleaseStaticIp"] }
+  ]
+}</code></pre>
+<p>So the key can only create VMs that carry the console's tag, and only change or delete VMs with that tag. Static IPs can't be tagged, so the console only ever releases the ones it named itself.</p>
+
+<h2>Delete a server</h2>
+<p>Only servers the console made can be deleted from here, and only once nothing is on them. Open <strong>Edit</strong> on the server, type its name and press <strong>Delete this server</strong>. The console takes a last snapshot, deletes the VM and releases its static IP. The snapshot is kept 14 days (listed under <strong>Snapshots of deleted servers</strong>) so you can still make a VM from it in Lightsail, then deleted.</p>
+
+<h2>Check Lightsail</h2>
+<p>Once a day the console looks for Lightsail VMs tagged as its own that aren't on the Servers page, and deletes expired snapshots. Press <strong>Check Lightsail</strong> to do it now. Stray VMs are shown on the page and emailed to the alert addresses, because they still cost money.</p>
+
+<h2>Practice mode</h2>
+<p>With <code>DEPLOYER_FAKE_ENGINE=1</code> and no key, Costs shows steady made-up numbers in the shape AWS sends, and Create server runs against a pretend Lightsail.</p>

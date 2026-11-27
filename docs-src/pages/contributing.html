@@ -1,0 +1,46 @@
+<!-- title: Contributing | desc: How to work on Lanternly: local setup, tests, the clubctl contract, access checks, migrations, sign-off and these docs. -->
+<p class="lead">Bug reports, fixes, docs and new plugins are all welcome. For anything bigger than a small fix, open an issue first so we can agree on the approach.</p>
+
+<h2>Local setup</h2>
+<pre><code>git clone https://github.com/thiyagarajanshankar13/lanternly.git
+cd lanternly
+cp .env.example .env.local   <span class="c"># DEPLOYER_SECRET_KEY, DEPLOYER_SETUP_TOKEN, DEPLOYER_FAKE_ENGINE=1</span>
+npm install
+npm run dev                  <span class="c"># http://localhost:3100/admin</span></code></pre>
+
+<h2>Before you send a pull request</h2>
+<pre><code>npm run typecheck
+npm test
+npx next build</code></pre>
+<ul>
+<li>Add or change tests with the code. Tests live in <code>tests/</code>, a plugin's in <code>tests/plugins/&lt;id&gt;/</code>.</li>
+<li><code>tests/contract.test.ts</code> snapshots every <code>clubctl</code> call and the settings sent with it. A changed snapshot changes what live servers receive: update it only on purpose (<code>npx vitest run -u</code>), with the matching change to <code>agent/clubctl</code>, and say so in the pull request.</li>
+<li>Every server action and admin API route must call an access check (<code>requireOwner</code>, <code>requireSite</code> and friends in <code>src/lib/guards.ts</code>). <code>tests/access.test.ts</code> fails otherwise.</li>
+<li>Database changes are a new entry at the end of <code>MIGRATIONS</code> in <code>src/lib/db.ts</code>. Never edit an existing one.</li>
+<li>Keep on-screen text plain and short. A screenshot helps for changes to how a page looks.</li>
+</ul>
+
+<h2>Repo map</h2>
+<div class="table"><table>
+<tr><th>Path</th><th>What's there</th></tr>
+<tr><td><code>src/app/admin/</code></td><td>The console's pages and server actions</td></tr>
+<tr><td><code>src/lib/</code></td><td>Operations queue, SSH runner, access rules, backups, monitoring, Postgres, apps</td></tr>
+<tr><td><code>src/plugins/</code></td><td>Plugin registry and the AWS plugin</td></tr>
+<tr><td><code>agent/</code></td><td><code>clubctl</code>, its SSH wrapper, the services VM setup and Compose files</td></tr>
+<tr><td><code>deploy/</code></td><td>Deployer VM setup and its Compose file</td></tr>
+<tr><td><code>scripts/</code></td><td><code>backup-tool.mjs</code>, <code>export-core.mjs</code></td></tr>
+<tr><td><code>.github/workflows/</code></td><td>CI, app builds, Set up a VM, Deploy the deployer</td></tr>
+</table></div>
+
+<h2>Sign your commits</h2>
+<p>We use the <a href="https://developercertificate.org/">Developer Certificate of Origin</a> instead of a CLA. Add a <code>Signed-off-by</code> line to each commit:</p>
+<pre><code>git commit -s -m "Fix the backup retry"</code></pre>
+<p>By contributing you agree your work is released under the GNU AGPL v3.</p>
+
+<h2>Improving these docs</h2>
+<p>The docs are plain HTML on the <code>gh-pages</code> branch. Each page's text is a fragment in <code>docs-src/pages/</code>; the menu, search index and page frame are added by a small script with no dependencies:</p>
+<pre><code>git checkout gh-pages
+<span class="c"># edit docs-src/pages/&lt;page&gt;.html</span>
+node docs-src/build.mjs
+<span class="c"># open docs/index.html in a browser, then commit docs-src/ and docs/</span></code></pre>
+<p>Every page has an <strong>Edit this page on GitHub</strong> link at the bottom.</p>

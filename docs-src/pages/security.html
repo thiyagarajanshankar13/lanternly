@@ -1,0 +1,51 @@
+<!-- title: Security | desc: How Lanternly keeps your servers and secrets safe: SSH locked to clubctl, pinned host keys, encryption at rest, two-step sign-in, access checks, and how to report a problem. -->
+<p class="lead">Lanternly is built so that a compromised console can do as little damage as possible, and so that secrets stay where they belong.</p>
+
+<h2>The console can't get a shell</h2>
+<p>The console's SSH key is added to the <code>deployer</code> user on each server with a forced command: <code>agent/clubctl-ssh</code>. That wrapper only runs <code>clubctl</code> with a fixed set of commands, each argument checked, and refuses anything else (<code>status; rm -rf /</code> is rejected). The <code>deployer</code> user's sudo rule allows that one program and nothing more.</p>
+
+<h2>Host keys are pinned</h2>
+<p>Each server's SSH host key is saved when you add it. The console refuses to talk to a server that presents a different key, so a swapped or impersonated server gets nothing.</p>
+
+<h2>Secrets</h2>
+<div class="table"><table>
+<tr><th>Secret</th><th>How it's kept</th></tr>
+<tr><td>App secret settings, registry tokens, bucket keys, SMTP password, GitHub App key, two-step secrets</td><td>Encrypted with AES-256-GCM under <code>DEPLOYER_SECRET_KEY</code> in the console database.</td></tr>
+<tr><td>Database and storage passwords</td><td>Generated on the server and never stored by the console. Reading one is an audited action.</td></tr>
+<tr><td>Backups</td><td>Encrypted with the backup key before upload. Servers never see the bucket.</td></tr>
+<tr><td>Logs</td><td>Secret settings and anything that looks like a password or token are masked before logs leave the console.</td></tr>
+</table></div>
+<div class="warn"><b class="t">Back up DEPLOYER_SECRET_KEY</b><p>It's in <code>/opt/deployer/.env</code>. Without it, the encrypted values in the console database can't be read. Keep a copy in your password manager next to the backup key.</p></div>
+
+<h2>Sign-in and sessions</h2>
+<ul>
+<li>Everyone needs a password (12+ characters) and an authenticator code. There is no way to turn two-step sign-in off.</li>
+<li>Sessions are kept on the server and end at once when someone is suspended or removed, or changes their password.</li>
+<li>Restores and backup key reveals ask for a fresh two-step code, with a limit on wrong tries.</li>
+</ul>
+
+<h2>Access checks</h2>
+<p>Every server action and admin API route checks the person's access (<code>src/lib/access.ts</code>). A test fails if one forgets. A service someone may not see answers 404, not 403, so its existence doesn't leak.</p>
+
+<h2>Network</h2>
+<ul>
+<li>Databases have no published port. Services in one project can't reach another project's services.</li>
+<li>Monitoring refuses private and loopback addresses.</li>
+<li>The GitHub webhook checks GitHub's signature with a constant-time compare.</li>
+<li>Recommended: allow SSH on services VMs only from the deployer VM.</li>
+</ul>
+
+<h2>Hardening checklist</h2>
+<ul>
+<li>Remove <code>DEPLOYER_SETUP_TOKEN</code> from <code>/opt/deployer/.env</code> after the first sign-in.</li>
+<li>Limit port 22 on services VMs to the deployer VM's IP; on the deployer VM, to your own IPs.</li>
+<li>Keep the backup key and <code>DEPLOYER_SECRET_KEY</code> in a password manager.</li>
+<li>Use a bucket with a different provider from your servers.</li>
+<li>Give people the lowest role that works, scoped to their projects.</li>
+<li>Apply OS security updates on the VMs (<code>unattended-upgrades</code> is Ubuntu's default).</li>
+<li>Upgrade to the newest Lanternly release: only it gets security fixes.</li>
+</ul>
+
+<h2>Report a vulnerability</h2>
+<p>Please don't open a public issue. Use <strong>Report a vulnerability</strong> on the repo's <a href="https://github.com/thiyagarajanshankar13/lanternly/security">Security tab</a>, with what you found, how to reproduce it and what an attacker could do. We aim to answer within 5 working days and fix confirmed problems within 30. Full policy: <a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+<p>Out of scope: anything that needs an owner account, root on a VM, problems in the apps you deploy, and denial of service against one install unless it's easy to trigger without signing in.</p>

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration reference · Lanternly docs</title>
+<meta name="description" content="Every environment variable for the Lanternly console, the server setup scripts and the GitHub Actions workflows.">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Configuration reference · Lanternly docs">
+<meta property="og:description" content="Every environment variable for the Lanternly console, the server setup scripts and the GitHub Actions workflows.">
+<meta name="theme-color" content="#0f0f11">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the page</a>
+<header class="top">
+<div class="top-in">
+<button class="menu-btn" type="button" aria-controls="side" aria-expanded="false" aria-label="Menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../"><svg width="28" height="28" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lfn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fde68a"/><stop offset="0.45" stop-color="#fbbf24"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs><path d="M26 12a6 6 0 0 1 12 0" fill="none" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round"/><rect x="19" y="12" width="26" height="6" rx="3" fill="#fbbf24"/><rect x="16.5" y="19.5" width="31" height="30" rx="9" fill="#1c1c20" stroke="#fbbf24" stroke-width="3"/><path d="M32 25c5 6 7 10 7 14a7 7 0 0 1-14 0c0-4 2-8 7-14z" fill="url(#lfn)"/><rect x="20" y="51" width="24" height="5" rx="2.5" fill="#fbbf24"/></svg><span>Lanternly</span><span class="brand-docs">Docs</span></a>
+<div class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search the docs" autocomplete="off" aria-label="Search the docs"><kbd>/</kbd><div id="results" class="results" role="listbox" hidden></div></div>
+<nav class="top-links" aria-label="Site"><a href="../">Home</a><a href="https://github.com/thiyagarajanshankar13/lanternly">GitHub</a></nav>
+</div>
+</header>
+<div class="wrap">
+<aside id="side" class="side"><nav aria-label="Documentation"><div class="nav-group"><p class="nav-head">Get started</p><ul><li><a href="./">Introduction</a></li><li><a href="quick-start.html">Quick start</a></li><li><a href="install.html">Install on your servers</a></li><li><a href="concepts.html">How it fits together</a></li></ul></div><div class="nav-group"><p class="nav-head">Run things</p><ul><li><a href="servers.html">Servers</a></li><li><a href="github-apps.html">Apps from GitHub</a></li><li><a href="docker-images.html">Docker images</a></li><li><a href="postgres.html">PostgreSQL</a></li><li><a href="s3-storage.html">S3 storage (MinIO) <span class="pill">soon</span></a></li><li><a href="domains.html">Domains and HTTPS</a></li></ul></div><div class="nav-group"><p class="nav-head">Keep it safe</p><ul><li><a href="backups.html">Backups</a></li><li><a href="monitoring.html">Monitoring</a></li><li><a href="people.html">People and access</a></li><li><a href="security.html">Security</a></li></ul></div><div class="nav-group"><p class="nav-head">Configure</p><ul><li><a href="settings.html">Settings and branding</a></li><li><a href="plugins.html">Plugins</a></li><li><a href="aws.html">Amazon Web Services plugin</a></li><li><a href="configuration.html" aria-current="page">Configuration reference</a></li></ul></div><div class="nav-group"><p class="nav-head">Help</p><ul><li><a href="upgrading.html">Upgrading Lanternly</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="contributing.html">Contributing</a></li></ul></div></nav></aside>
+<main id="content" class="content">
+<p class="crumb">Configure</p>
+<article class="doc">
+<h1>Configuration reference</h1>
+<p class="lead">Most configuration lives in the console's Settings. A few values are environment variables, set in <code>/opt/deployer/.env</code> on the deployer VM (or <code>.env.local</code> when running locally).</p>
+
+<h2 id="console"><a class="anchor" href="#console" aria-hidden="true" tabindex="-1">#</a>Console</h2>
+<div class="table"><table>
+<tr><th>Variable</th><th>Meaning</th></tr>
+<tr><td><code>DEPLOYER_SECRET_KEY</code></td><td><strong>Required.</strong> 32 random bytes as hex (<code>openssl rand -hex 32</code>). Encrypts the secrets the console stores. Losing it loses them. Made by the setup script.</td></tr>
+<tr><td><code>DEPLOYER_URL</code></td><td>The console's own address, such as <code>https://admin.example.com</code>. Used in links, the authenticator label and the GitHub webhook. Must be public <code>https://</code> for Connect GitHub and Create server.</td></tr>
+<tr><td><code>DEPLOYER_SETUP_TOKEN</code></td><td>One-time code for creating the first owner at <code>/admin/setup</code>. Remove it once the owner exists.</td></tr>
+<tr><td><code>DEPLOYER_DATA_DIR</code></td><td>Where the SQLite database and uploads live. <code>/data</code> in the container (<code>/opt/deployer/data</code> on the VM).</td></tr>
+<tr><td><code>DEPLOYER_DB_FILE</code></td><td>Database file, if not <code>&lt;data dir&gt;/deployer.sqlite</code>.</td></tr>
+<tr><td><code>DEPLOYER_SSH_KEY_FILE</code> or <code>DEPLOYER_SSH_KEY</code></td><td>The private key the console uses to reach servers: a file path, or the key itself.</td></tr>
+<tr><td><code>DEPLOYER_FAKE_ENGINE</code></td><td><code>1</code> = practice mode: servers, GitHub, buckets and AWS are simulated. Never on a real install.</td></tr>
+<tr><td><code>DEPLOYER_FAKE_ENGINE_DELAY</code></td><td>Milliseconds each simulated step takes, to see progress screens.</td></tr>
+</table></div>
+
+<h3 id="timers"><a class="anchor" href="#timers" aria-hidden="true" tabindex="-1">#</a>Timers</h3>
+<p>Each background timer can be stopped with <code>off</code>, for example on a second copy of the console used for testing.</p>
+<div class="table"><table>
+<tr><th>Variable</th><th>Stops</th></tr>
+<tr><td><code>DEPLOYER_MONITOR=off</code></td><td>Monitoring checks and alerts</td></tr>
+<tr><td><code>DEPLOYER_BACKUPS=off</code></td><td>Scheduled backups and clean-up</td></tr>
+<tr><td><code>DEPLOYER_DB_WATCH=off</code></td><td>Database size and quota checks</td></tr>
+<tr><td><code>DEPLOYER_COSTS=off</code></td><td>AWS plugin: the daily cost fetch</td></tr>
+<tr><td><code>DEPLOYER_PROVISION=off</code></td><td>AWS plugin: server create/delete steps and the daily Lightsail check</td></tr>
+</table></div>
+
+<h3 id="other"><a class="anchor" href="#other" aria-hidden="true" tabindex="-1">#</a>Other</h3>
+<div class="table"><table>
+<tr><th>Variable</th><th>Meaning</th></tr>
+<tr><td><code>DEPLOYER_MONITOR_ALLOW_PRIVATE</code></td><td>Lets monitoring check private and loopback addresses. For local testing only.</td></tr>
+<tr><td><code>DEPLOYER_AGENT_DIR</code></td><td>AWS plugin: where the <code>agent/</code> files are that new servers get. Default <code>./agent</code> in the image.</td></tr>
+</table></div>
+
+<h2 id="deployer-vm-setup"><a class="anchor" href="#deployer-vm-setup" aria-hidden="true" tabindex="-1">#</a>Deployer VM setup</h2>
+<p>For <code>deploy/setup-deployer-vm.sh</code>:</p>
+<div class="table"><table>
+<tr><th>Variable</th><th>Meaning</th></tr>
+<tr><td><code>DEPLOYER_DOMAIN</code></td><td><strong>Required.</strong> The console's domain, such as <code>admin.example.com</code>.</td></tr>
+<tr><td><code>DEPLOYER_SETUP_TOKEN</code></td><td>Optional. Your own first sign-in code (16+ characters, no spaces or quotes). Otherwise one is made up and printed.</td></tr>
+</table></div>
+<p>When starting the console with Docker Compose in <code>/opt/deployer</code>, <code>DEPLOYER_IMAGE</code> names the image to run.</p>
+
+<h2 id="services-vm-setup"><a class="anchor" href="#services-vm-setup" aria-hidden="true" tabindex="-1">#</a>Services VM setup</h2>
+<p>For <code>agent/setup-clubs-vm.sh</code>:</p>
+<div class="table"><table>
+<tr><th>Variable</th><th>Meaning</th></tr>
+<tr><td><code>DEPLOYER_PUBLIC_KEY</code></td><td><strong>Required.</strong> The console's SSH public key.</td></tr>
+<tr><td><code>ACME_EMAIL</code></td><td><strong>Required.</strong> Email for Let's Encrypt notices.</td></tr>
+<tr><td><code>AGENT_ROOT</code></td><td>Folder for everything on the server. Default <code>/opt/avrosphere</code>.</td></tr>
+<tr><td><code>AGENT_NAMESPACE</code></td><td>Prefix of container names, labels and shared networks. Default <code>avrosphere</code>.</td></tr>
+<tr><td><code>GHCR_USER</code>, <code>GHCR_TOKEN</code></td><td>Optional login for pulling private images from ghcr.io.</td></tr>
+</table></div>
+
+<h2 id="github-actions"><a class="anchor" href="#github-actions" aria-hidden="true" tabindex="-1">#</a>GitHub Actions</h2>
+<div class="table"><table>
+<tr><th>Workflow</th><th>Secrets and variables</th></tr>
+<tr><td><code>setup-vm.yml</code> (Set up a VM)</td><td>See <a href="install.html#set-up-a-vm">Install → Set up a VM</a>.</td></tr>
+<tr><td><code>deploy-deployer.yml</code> (Deploy the deployer)</td><td>secret <code>DEPLOYER_VM_SSH_KEY</code>, variable <code>DEPLOYER_VM_HOST</code> (and <code>DEPLOYER_VM_USER</code>, <code>DEPLOYER_VM_HOST_KEY</code>).</td></tr>
+<tr><td><code>build-app-image.yml</code> (app builds)</td><td>variable <code>APPS_GITHUB_APP_ID</code>, secret <code>APPS_GITHUB_APP_KEY</code>. Saved for you by Connect GitHub.</td></tr>
+<tr><td><code>ci.yml</code></td><td>None: type check, tests and build on pull requests.</td></tr>
+</table></div>
+
+<h2 id="ports-and-files"><a class="anchor" href="#ports-and-files" aria-hidden="true" tabindex="-1">#</a>Ports and files</h2>
+<div class="table"><table>
+<tr><th>What</th><th>Where</th></tr>
+<tr><td>Console (dev)</td><td><code>http://localhost:3100/admin</code></td></tr>
+<tr><td>Console on the VM</td><td><code>/opt/deployer</code>: <code>.env</code>, <code>docker-compose.yml</code>, <code>Caddyfile</code>, <code>data/</code>, <code>keys/</code></td></tr>
+<tr><td>Services on a server</td><td><code>&lt;AGENT_ROOT&gt;</code>: <code>agent.conf</code>, one folder per service, Caddy config</td></tr>
+<tr><td>Open ports</td><td>80 and 443 on both VMs; 22 on services VMs from the deployer VM only</td></tr>
+</table></div>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a class="prev" href="aws.html"><span>Previous</span>Amazon Web Services plugin</a><a class="next" href="upgrading.html"><span>Next</span>Upgrading Lanternly</a></nav>
+<p class="edit"><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/gh-pages/docs-src/pages/configuration.html">Edit this page on GitHub</a></p>
+<footer class="foot"><span>Lanternly · AGPL-3.0</span><a href="https://github.com/thiyagarajanshankar13/lanternly">GitHub</a><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/SECURITY.md">Security policy</a><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/CONTRIBUTING.md">Contributing</a></footer>
+</main>
+<nav class="toc" aria-label="On this page"><p class="nav-head">On this page</p><ul><li><a href="#console">Console</a></li><li><a href="#deployer-vm-setup">Deployer VM setup</a></li><li><a href="#services-vm-setup">Services VM setup</a></li><li><a href="#github-actions">GitHub Actions</a></li><li><a href="#ports-and-files">Ports and files</a></li></ul></nav>
+</div>
+<script src="docs.js" defer></script>
+</body>
+</html>

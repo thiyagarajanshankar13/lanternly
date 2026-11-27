@@ -1,0 +1,33 @@
+<!-- title: Plugins | desc: What Lanternly plugins can add, how to turn them on and off, and how to write your own plugin with service kinds, pages, settings and timers. -->
+<p class="lead">Plugins add service kinds, pages, settings and timers without the core knowing about them. Lanternly ships with one, Amazon Web Services, and you can write your own.</p>
+
+<h2>Turning plugins on and off</h2>
+<p>Owners open <strong>Settings → Plugins → Manage plugins</strong>. Each plugin says what it adds and what turning it off does. A fresh install starts with every plugin off.</p>
+<p>Turning a plugin off hides its pages, menu items and buttons, but never stops what it created: services keep running, backed up and monitored, and servers it made stay listed so they can still be followed and deleted.</p>
+
+<h2>Included plugins</h2>
+<div class="cards">
+<a class="card" href="aws.html"><b>Amazon Web Services</b><span>Create and delete Lightsail servers from the console, and see what AWS charges in your currency, with budget alerts and a per-project estimate.</span></a>
+</div>
+
+<h2>Write a plugin</h2>
+<p>A plugin lives in <code>src/plugins/&lt;id&gt;/</code>. The AWS plugin (<code>src/plugins/aws/</code>) is a complete example.</p>
+<ol class="steps">
+<li><strong>Describe it.</strong> Create <code>src/plugins/&lt;id&gt;/plugin.ts</code> exporting a <code>DeployerPlugin</code> (typed in <code>src/plugins/types.ts</code>): id, name, description, icon, the pages it owns, optional side-menu items (<code>{ href, label, icon, group }</code>) and service kinds.</li>
+<li><strong>Register it.</strong> Add one line to <code>src/plugins/installed.ts</code>. If it has server code (timers, service kind steps, a <code>latestVersion</code> check), add a line to <code>installed-hooks.ts</code>; if it has React parts (a settings card, Servers or Services page parts, a service's page), to <code>installed-parts.ts</code>.</li>
+<li><strong>Guard its pages.</strong> Pages under <code>src/app/admin/(console)/</code> that belong to the plugin call <code>requirePlugin('&lt;id&gt;')</code>; its server actions return <code>pluginOffError('&lt;id&gt;')</code> while it's off.</li>
+<li><strong>Server steps.</strong> A service kind's own steps on the server go in <code>agent/kinds/&lt;id&gt;.sh</code>, which <code>clubctl</code> loads when present.</li>
+<li><strong>Test it.</strong> Tests go in <code>tests/plugins/&lt;id&gt;/</code>. Nothing the plugin adds should show while it's off.</li>
+</ol>
+
+<h3>How the core reaches plugins</h3>
+<p>The core never imports a plugin directly. It goes through two files:</p>
+<ul>
+<li><code>src/plugins/server.ts</code>: server-side hooks, such as <code>startPlugins()</code> (timers, called at start-up), <code>projectCosts()</code>, <code>serverBusy()</code> and <code>serviceKind()</code> for create, configure and upgrade steps of a plugin's service kind.</li>
+<li><code>src/plugins/parts.ts</code>: React parts, such as <code>serversPageParts()</code> (toolbar, notices, footer), parts for the Services page, a service kind's page and its list cells.</li>
+</ul>
+
+<h3>Tagging plugin lines</h3>
+<p>Every line in a shared file that mentions a plugin ends with a comment <code>plugin:&lt;id&gt;</code>, and longer stretches sit between <code>plugin:&lt;id&gt;:start</code> and <code>plugin:&lt;id&gt;:end</code>. A file whose first line carries the tag belongs to the plugin. This lets <code>scripts/export-core.mjs</code> produce a copy without a given plugin (useful for keeping a plugin private), so keep the tags when you edit those lines.</p>
+<pre><code>import { awsPlugin } from './aws/plugin' <span class="c">// plugin:aws</span></code></pre>
+

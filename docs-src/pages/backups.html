@@ -1,0 +1,52 @@
+<!-- title: Backups | desc: Encrypted, scheduled backups of databases and services to any S3-compatible bucket, with restore in place or into a copy, and a tool to read backups without the console. -->
+<p class="lead">Backups go to any S3-compatible bucket you own, encrypted with a key only you hold before they leave the console. Each service has its own schedule, and backups are also taken before upgrades, restores and removals.</p>
+
+<h2>How it works</h2>
+<ul>
+<li>The console collects each part of a backup from the server over its SSH connection, encrypts it with the <strong>backup key</strong> and uploads it. Your servers never see the bucket keys and never talk to the bucket.</li>
+<li>Files are stored once per content, so frequent backups mostly cost the size of the database dump.</li>
+<li>Optionally, the image each backup needs is saved once in the bucket too, so a restore still works if the image is deleted from its registry.</li>
+<li>Until a bucket is set up, each server keeps a nightly database copy on its own disk (14 days).</li>
+</ul>
+
+<h2>Set up the bucket (once)</h2>
+<ol class="steps">
+<li>Create a private bucket in any S3-style store: AWS S3, Lightsail object storage, Backblaze B2, Cloudflare R2, Wasabi or MinIO. Pick a region near your servers.</li>
+<li>Create an access key that can read and write that bucket.</li>
+<li>On <strong>Backups → Set up the bucket</strong>, fill in the bucket name, region and both key parts. For anything other than AWS, open <strong>Advanced → Storage address</strong> and enter the store's S3 endpoint (for example <code>https://&lt;account&gt;.r2.cloudflarestorage.com</code>).</li>
+<li>Choose the schedule new services get and press <strong>Save</strong>, then <strong>Test the bucket</strong>: it writes a test file, reads it back and deletes it.</li>
+<li>A <strong>Save the backup key now</strong> box appears. Put the key in your password manager, tick <strong>I have saved the backup key somewhere safe</strong> and press <strong>Done</strong>.</li>
+</ol>
+<div class="warn"><b class="t">Losing the backup key means losing the backups</b><p>Everything in the bucket is encrypted with it. If the deployer VM is lost, the key is the only way to read them. To see it again later, press <strong>Show backup key</strong> and enter a two-step code.</p></div>
+<div class="tip"><b class="t">Keep the bucket somewhere else</b><p>A bucket in the same cloud account as your servers doesn't protect you from losing that account. A bucket with another provider does.</p></div>
+
+<h2>Schedules</h2>
+<p>Each service has its own schedule, under <strong>Backups</strong> on its page (<strong>Change the schedule</strong>):</p>
+<ul>
+<li><strong>Daily</strong> at the hour you pick, in the default time zone. New services get daily at 2am, kept 30 days, unless you change the default.</li>
+<li><strong>Frequent</strong>: every hour or every 6 hours, with its own keep period. A frequent backup is skipped when the daily one has just run.</li>
+<li>Always: before every database upgrade, before every restore and before a service is removed. <strong>Back up now</strong> takes one by hand.</li>
+</ul>
+<p>Changing a keep period applies to existing backups too. The newest good backup of a running service is never deleted, whatever its age. Failed backups are cleaned up after two days. A removed service's backups are kept for the period set on the Backups page (30 days by default).</p>
+
+<h2>Watching backups</h2>
+<p>The Backups page lists every service's last good backup, how many it has, the space they use and a flag when one failed or is overdue, plus the bucket's total use. When a scheduled backup fails, or none has worked for twice the usual gap, an email goes to the alert addresses, and another when backups work again.</p>
+
+<h2>Restore</h2>
+<p>On the service's page, under <strong>Backups</strong>, open <strong>Restore</strong> for the backup you want. Only owners can restore, with the service's name and a fresh two-step code.</p>
+<ul>
+<li><strong>Put this service back</strong>: a safety backup is taken first, then the data is replaced. If the service doesn't start afterwards, it's put back as it was. Its addresses and settings stay as they are now.</li>
+<li><strong>Make a copy at a new address</strong>: creates a separate service from the backup, so you can look at old data without touching the live one. Remove it when you're done. For a database, the copy is a new database in the same project.</li>
+</ul>
+<p>Restores are listed in the service's History like every other change.</p>
+
+<h2>Read backups without the console</h2>
+<p>If the deployer VM is lost, <code>scripts/backup-tool.mjs</code> in the repo reads the bucket directly with the backup key and the bucket keys, checking every checksum:</p>
+<pre><code>export BACKUP_KEY=…  BUCKET=my-backups  REGION=eu-central-1
+export AWS_ACCESS_KEY_ID=…  AWS_SECRET_ACCESS_KEY=…
+node scripts/backup-tool.mjs list
+node scripts/backup-tool.mjs fetch &lt;service folder&gt; &lt;backup&gt; ./out</code></pre>
+<p>A database backup comes out as <code>database.dump</code>, which you load with <code>pg_restore --no-owner</code>.</p>
+
+<h2>Moving to a new provider</h2>
+<p>Because backups live in your bucket, moving is: set up a services VM at the new provider, add it under Servers, then restore each service as a copy on the new server and move your domains. The old server can then be emptied and removed.</p>

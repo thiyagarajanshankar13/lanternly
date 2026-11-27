@@ -1,0 +1,28 @@
+<!-- title: S3 storage (MinIO) | desc: Coming soon: S3-compatible bucket storage as a project service, running MinIO on your own server and linked to apps. -->
+<div class="soon"><b class="t">Coming soon</b><p>S3 storage is built and in review, and isn't in a release yet. This page describes how it will work so you can plan for it. Watch the <a href="https://github.com/thiyagarajanshankar13/lanternly">repo</a> for the release.</p></div>
+
+<p class="lead">S3 storage gives a project its own S3-compatible bucket storage on its server, next to PostgreSQL, so apps can keep uploads and files without an outside service.</p>
+
+<h2>What you'll get</h2>
+<ul>
+<li><strong>New service → S3 storage (MinIO).</strong> Its own container per storage, running a patched MinIO image pinned to the pulled digest, 256 MB of memory and no published port.</li>
+<li><strong>Buckets.</strong> Up to 20 per storage. Add one, remove an empty one, and choose who can read it: <strong>Apps only</strong> or <strong>Anyone with the link</strong>.</li>
+<li><strong>Optional web address</strong> with HTTPS, so browsers can open public files and signed links. It's monitored like any other address.</li>
+<li><strong>Keys made on the server</strong> and never stored by the console. <strong>Connect → Show values</strong> reads them over SSH and writes it to the access log. <strong>New keys</strong> rotates them and restarts the apps that use them.</li>
+<li><strong>Soft quota</strong> (10 GB by default) with emails at 80% and 100%. Writes are never stopped.</li>
+<li><strong>Backups and restore</strong> through the normal <a href="backups.html">bucket backups</a>.</li>
+</ul>
+
+<h2>Linking storage to an app</h2>
+<p>In the app's settings (the section becomes <strong>Databases and storage</strong>), tick the storage and pick a bucket. The app gets:</p>
+<pre><code>S3_ENDPOINT=http://shop-files:9000
+S3_PUBLIC_URL=https://shop-files.example.com
+S3_REGION=…
+S3_BUCKET=uploads
+S3_ACCESS_KEY_ID=…
+S3_SECRET_ACCESS_KEY=…
+S3_FORCE_PATH_STYLE=true</code></pre>
+<p>With no prefix it also gets the <code>AWS_*</code> names AWS SDKs read, so most S3 libraries work without code changes. <code>${{shop-files.S3_ENDPOINT}}</code> references work too.</p>
+
+<h2>When it ships</h2>
+<p>Servers will need the new <code>clubctl</code>: run the services VM setup (or the <strong>Set up a VM</strong> workflow) again after upgrading. Until then, creating a storage fails with a clear message, and <strong>Try again</strong> works afterwards.</p>

@@ -1,0 +1,48 @@
+<!-- title: Servers | desc: Add any Ubuntu server you can reach over SSH, set its capacity, update clubctl and remove servers in Lanternly. -->
+<p class="lead">Servers are the machines that run your services. Any Ubuntu 24.04 VM you can reach over SSH works, from any cloud or your own hardware.</p>
+
+<h2>Prepare a server</h2>
+<p>On the new VM, copy the repo's <code>agent/</code> folder and run its setup as root, with the console's SSH public key (shown under <strong>Servers</strong> and printed when you set up the deployer VM):</p>
+<pre><code>sudo DEPLOYER_PUBLIC_KEY="ssh-ed25519 AAAA… deployer" \
+     ACME_EMAIL=you@example.com \
+     AGENT_ROOT=/opt/lanternly AGENT_NAMESPACE=lanternly \
+     ./setup-clubs-vm.sh</code></pre>
+<div class="table"><table>
+<tr><th>Variable</th><th>Required</th><th>Meaning</th></tr>
+<tr><td><code>DEPLOYER_PUBLIC_KEY</code></td><td>yes</td><td>The console's SSH public key. It's added to the <code>deployer</code> user, locked to <code>clubctl</code>.</td></tr>
+<tr><td><code>ACME_EMAIL</code></td><td>yes</td><td>Email Let's Encrypt writes to about certificates.</td></tr>
+<tr><td><code>AGENT_ROOT</code></td><td>no</td><td>Folder where services live. Default <code>/opt/avrosphere</code>.</td></tr>
+<tr><td><code>AGENT_NAMESPACE</code></td><td>no</td><td>Prefix of container names and labels. Default <code>avrosphere</code>.</td></tr>
+<tr><td><code>GHCR_USER</code>, <code>GHCR_TOKEN</code></td><td>no</td><td>Lets the server pull private images from ghcr.io (token with <code>read:packages</code>).</td></tr>
+</table></div>
+<p>The script installs Docker, adds swap, starts Caddy, installs <code>clubctl</code> and its files, and prints the server's <strong>host key</strong> at the end. It's safe to run again; running it again is also how you update <code>clubctl</code>.</p>
+<div class="note"><b class="t">Pick your names on day one</b><p><code>AGENT_ROOT</code> and <code>AGENT_NAMESPACE</code> are written to <code>&lt;AGENT_ROOT&gt;/agent.conf</code> and can't change once the server has services.</p></div>
+
+<h2>Add it to the console</h2>
+<p>Open <strong>Servers → Add existing server</strong> and fill in:</p>
+<ul>
+<li><strong>Name</strong>: anything that helps you recognise it, such as <em>Frankfurt 1</em>.</li>
+<li><strong>Address (for SSH)</strong>: a host name or IP the deployer VM can reach. The user is always <code>deployer</code>, the one the setup made.</li>
+<li><strong>Public IP</strong>: where service domains point. Shown to people adding a custom domain.</li>
+<li><strong>Host key</strong>: the line printed at the end of the setup (<code>ssh-ed25519 AAAA…</code>). The console refuses to talk to a server whose key doesn't match.</li>
+<li><strong>Memory (MB)</strong>: the server's RAM. With it set, new services only go on when their memory limits fit. 1 GB is kept for Caddy, the system and the database engine.</li>
+<li><strong>Most services it may hold</strong> (optional) and <strong>Takes new services</strong>: untick it to stop new services landing on a server you're emptying.</li>
+</ul>
+<p>The console connects straight away and shows the server's live memory and disk on the Servers page.</p>
+
+<h2>Capacity</h2>
+<p>Every app, image and database has a memory limit (256 MB unless you change it). Creating a service, or giving one more memory, is refused when the memory already given out on its server would go over the server's figure. When every server is full, add another server or raise a limit.</p>
+<p>A project lives on one server, so all of a project's services share that server's room.</p>
+
+<h2>Lock down SSH</h2>
+<p>Only the console needs SSH. In your provider's firewall, allow port 22 on services VMs from the deployer VM's IP only (plus your provider's browser console, if you use it). Ports 80 and 443 stay open to everyone for your services.</p>
+
+<h2>Updating clubctl</h2>
+<p>When a new Lanternly release changes anything under <code>agent/</code>, run the setup script again on each server, or run the <strong>Set up a VM</strong> workflow (target the services VM). Existing services keep running while it updates. Release notes say when this is needed.</p>
+
+<h2>Removing a server</h2>
+<p>Move or remove its projects and services first. Then open <strong>Edit</strong> on the server and press <strong>Delete this server's record</strong>. This only removes it from the console: delete the VM at your provider yourself.</p>
+<p>Servers made by the <a href="aws.html">AWS plugin</a> can be deleted for real from the console, with a final snapshot.</p>
+
+<h2>Creating servers from the console</h2>
+<p>With the AWS plugin turned on, owners can press <strong>Create server</strong> to make a new Lightsail VM that sets itself up and joins the list in about 10 minutes. See <a href="aws.html#create-a-server">Create a server</a>.</p>

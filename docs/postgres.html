@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PostgreSQL · Lanternly docs</title>
+<meta name="description" content="Create PostgreSQL databases in a project, link them to apps, reveal and rotate passwords, upgrade versions, load and download dumps, and set size quotas.">
+<meta property="og:type" content="article">
+<meta property="og:title" content="PostgreSQL · Lanternly docs">
+<meta property="og:description" content="Create PostgreSQL databases in a project, link them to apps, reveal and rotate passwords, upgrade versions, load and download dumps, and set size quotas.">
+<meta name="theme-color" content="#0f0f11">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the page</a>
+<header class="top">
+<div class="top-in">
+<button class="menu-btn" type="button" aria-controls="side" aria-expanded="false" aria-label="Menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../"><svg width="28" height="28" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lfn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fde68a"/><stop offset="0.45" stop-color="#fbbf24"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs><path d="M26 12a6 6 0 0 1 12 0" fill="none" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round"/><rect x="19" y="12" width="26" height="6" rx="3" fill="#fbbf24"/><rect x="16.5" y="19.5" width="31" height="30" rx="9" fill="#1c1c20" stroke="#fbbf24" stroke-width="3"/><path d="M32 25c5 6 7 10 7 14a7 7 0 0 1-14 0c0-4 2-8 7-14z" fill="url(#lfn)"/><rect x="20" y="51" width="24" height="5" rx="2.5" fill="#fbbf24"/></svg><span>Lanternly</span><span class="brand-docs">Docs</span></a>
+<div class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search the docs" autocomplete="off" aria-label="Search the docs"><kbd>/</kbd><div id="results" class="results" role="listbox" hidden></div></div>
+<nav class="top-links" aria-label="Site"><a href="../">Home</a><a href="https://github.com/thiyagarajanshankar13/lanternly">GitHub</a></nav>
+</div>
+</header>
+<div class="wrap">
+<aside id="side" class="side"><nav aria-label="Documentation"><div class="nav-group"><p class="nav-head">Get started</p><ul><li><a href="./">Introduction</a></li><li><a href="quick-start.html">Quick start</a></li><li><a href="install.html">Install on your servers</a></li><li><a href="concepts.html">How it fits together</a></li></ul></div><div class="nav-group"><p class="nav-head">Run things</p><ul><li><a href="servers.html">Servers</a></li><li><a href="github-apps.html">Apps from GitHub</a></li><li><a href="docker-images.html">Docker images</a></li><li><a href="postgres.html" aria-current="page">PostgreSQL</a></li><li><a href="s3-storage.html">S3 storage (MinIO) <span class="pill">soon</span></a></li><li><a href="domains.html">Domains and HTTPS</a></li></ul></div><div class="nav-group"><p class="nav-head">Keep it safe</p><ul><li><a href="backups.html">Backups</a></li><li><a href="monitoring.html">Monitoring</a></li><li><a href="people.html">People and access</a></li><li><a href="security.html">Security</a></li></ul></div><div class="nav-group"><p class="nav-head">Configure</p><ul><li><a href="settings.html">Settings and branding</a></li><li><a href="plugins.html">Plugins</a></li><li><a href="aws.html">Amazon Web Services plugin</a></li><li><a href="configuration.html">Configuration reference</a></li></ul></div><div class="nav-group"><p class="nav-head">Help</p><ul><li><a href="upgrading.html">Upgrading Lanternly</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="contributing.html">Contributing</a></li></ul></div></nav></aside>
+<main id="content" class="content">
+<p class="crumb">Run things</p>
+<article class="doc">
+<h1>PostgreSQL</h1>
+<p class="lead">Each PostgreSQL database runs in its own container with a volume and a health check, on its project's private network. It has no address on the internet, and its password never leaves the server unless someone asks to see it.</p>
+
+<h2 id="create-a-database"><a class="anchor" href="#create-a-database" aria-hidden="true" tabindex="-1">#</a>Create a database</h2>
+<ol class="steps">
+<li>Open a project and press <strong>New service → PostgreSQL database</strong>.</li>
+<li>Give it a <strong>name</strong>, such as <code>shop-db</code>. Apps reach it at <code>shop-db:5432</code>.</li>
+<li>Pick a <strong>version</strong> (16 by default).</li>
+<li>Under <strong>Size and limits</strong>, change the memory (default 256 MB) and the disk quota (default 5 GB) if you like.</li>
+<li>Press <strong>Create database</strong>. It's ready in a few seconds.</li>
+</ol>
+<p>The engine is tuned to its memory: <code>shared_buffers</code> is a quarter of it, and <code>max_connections</code> grows with it (20 to 200).</p>
+<p>Several apps can share one database. Add a second only when you want separate data; its suggested name is then <code>&lt;project&gt;-db-2</code>.</p>
+
+<h2 id="link-a-database-to-an-app"><a class="anchor" href="#link-a-database-to-an-app" aria-hidden="true" tabindex="-1">#</a>Link a database to an app</h2>
+<p>In the app's <strong>Settings</strong>, tick the database under <strong>Databases</strong>. The app restarts with these settings:</p>
+<pre><code>DATABASE_URL=postgres://…@shop-db:5432/…
+PGHOST=shop-db
+PGPORT=5432
+PGUSER=…
+PGPASSWORD=…
+PGDATABASE=…</code></pre>
+<p>For a second database, give it a <strong>prefix</strong> such as <code>ANALYTICS_</code>: the app then gets <code>ANALYTICS_DATABASE_URL</code> and so on.</p>
+<p>You can also use a database's values inside any setting:</p>
+<pre><code>REPORTS_URL=${{shop-db.DATABASE_URL}}</code></pre>
+<p>Both are filled in on the server, so the password never appears in the app's settings in the console.</p>
+
+<h2 id="the-database-s-page"><a class="anchor" href="#the-database-s-page" aria-hidden="true" tabindex="-1">#</a>The database's page</h2>
+<ul>
+<li><strong>Connect</strong> shows the variables an app needs, with the password hidden. <strong>Reveal</strong> reads it from the server; every reveal is written to the access log.</li>
+<li><strong>Back up</strong> takes a copy now. Copies are also taken on the backup schedule (see <a href="backups.html">Backups</a>).</li>
+<li><strong>Pause</strong> stops the database; apps using it stop working until <strong>Resume</strong>.</li>
+<li><strong>Settings</strong>: display name, memory, quota and notes.</li>
+<li><strong>More → Download a dump</strong>: a <code>pg_dump</code> custom-format file you can load on your computer with <code>pg_restore</code>.</li>
+<li><strong>More → Load a dump</strong>: replace the data with a <code>pg_dump -Fc</code> file up to 2 GB. A backup is taken first, and linked apps restart afterwards.</li>
+<li><strong>More → New password</strong>: rotates the password and restarts the apps that use it.</li>
+<li><strong>More → Newer PostgreSQL</strong>: upgrades to a newer major version by dump and restore. If anything fails, the old version stays.</li>
+<li><strong>More → Move to project</strong> and <strong>Remove</strong> (owners only; a final dump is kept on the server). A database still linked by apps can't be removed or moved.</li>
+</ul>
+
+<h2 id="working-on-the-data-from-your-computer"><a class="anchor" href="#working-on-the-data-from-your-computer" aria-hidden="true" tabindex="-1">#</a>Working on the data from your computer</h2>
+<p>The database has no public port. Download a dump and restore it locally:</p>
+<pre><code>createdb shop_copy
+pg_restore --no-owner -d shop_copy shop-db.dump</code></pre>
+<p>To push data in, make a dump with <code>pg_dump -Fc</code> and use <strong>Load a dump</strong>.</p>
+
+<h2 id="quota-and-full-databases"><a class="anchor" href="#quota-and-full-databases" aria-hidden="true" tabindex="-1">#</a>Quota and full databases</h2>
+<p>Size is checked every 5 minutes against the quota.</p>
+<ul>
+<li>At <strong>80%</strong> the alert addresses get an email.</li>
+<li>At <strong>100%</strong> the database becomes read-only (apps can read but not write) and another email goes out.</li>
+<li>Raise the quota in Settings or delete data, and it can write again within 5 minutes.</li>
+</ul>
+<p>The quota is a soft limit enforced with PostgreSQL's <code>default_transaction_read_only</code>, not a disk limit.</p>
+
+<h2 id="limits"><a class="anchor" href="#limits" aria-hidden="true" tabindex="-1">#</a>Limits</h2>
+<ul>
+<li>One database per container. No outside port: use dumps.</li>
+<li>No point-in-time recovery: backups are scheduled dumps.</li>
+</ul>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a class="prev" href="docker-images.html"><span>Previous</span>Docker images</a><a class="next" href="s3-storage.html"><span>Next</span>S3 storage (MinIO)</a></nav>
+<p class="edit"><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/gh-pages/docs-src/pages/postgres.html">Edit this page on GitHub</a></p>
+<footer class="foot"><span>Lanternly · AGPL-3.0</span><a href="https://github.com/thiyagarajanshankar13/lanternly">GitHub</a><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/SECURITY.md">Security policy</a><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/CONTRIBUTING.md">Contributing</a></footer>
+</main>
+<nav class="toc" aria-label="On this page"><p class="nav-head">On this page</p><ul><li><a href="#create-a-database">Create a database</a></li><li><a href="#link-a-database-to-an-app">Link a database to an app</a></li><li><a href="#the-database-s-page">The database's page</a></li><li><a href="#working-on-the-data-from-your-computer">Working on the data from your computer</a></li><li><a href="#quota-and-full-databases">Quota and full databases</a></li><li><a href="#limits">Limits</a></li></ul></nav>
+</div>
+<script src="docs.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!-- title: Troubleshooting | desc: Fixes for common Lanternly problems: SSH and host keys, failed builds, health checks, HTTPS, email, backups, full servers and AWS. -->
+<p class="lead">Most problems show up in a service's <strong>History</strong>, where every operation keeps its full output. Start there.</p>
+
+<h2>Servers and SSH</h2>
+<h3>"Host key doesn't match"</h3>
+<p>The server presented a different SSH host key from the one saved. If you rebuilt the VM, that's expected: open <strong>Servers → Edit</strong> and paste the new key printed by the setup script. If you didn't, stop and find out why before going further.</p>
+<h3>Can't connect to a server</h3>
+<ul>
+<li>Check port 22 on the server allows the deployer VM's IP.</li>
+<li>Check the setup ran with the right <code>DEPLOYER_PUBLIC_KEY</code> (the one under <strong>Servers</strong>).</li>
+<li>The SSH user is always <code>deployer</code>, not <code>ubuntu</code> or <code>root</code>.</li>
+</ul>
+<h3>"Not enough room on the server"</h3>
+<p>The memory already given out on that server plus the new service's limit is over the server's figure. Lower some memory limits, raise the server's figure if it really has more RAM, or add a server.</p>
+<h3>A new command is refused</h3>
+<p>The server has an older <code>clubctl</code> than the console expects. Run the services setup again (see <a href="upgrading.html#update-clubctl-on-servers">Update clubctl</a>).</p>
+
+<h2>Apps and builds</h2>
+<h3>The build fails</h3>
+<p>Open <strong>Builds → GitHub log</strong>. The usual causes: the Dockerfile path is wrong, the GitHub App isn't installed on the repo, or the Lanternly repo is missing the build secrets (the GitHub page says so). A failed build never touches the running version.</p>
+<h3>"No build started"</h3>
+<p>The build workflow didn't start within 5 minutes. Check that <code>.github/workflows/build-app-image.yml</code> is on your copy's default branch and that Actions are enabled there.</p>
+<h3>Pushes don't deploy</h3>
+<ul>
+<li>Check <strong>Deploy every push to the branch by itself</strong> is ticked in the app's Settings.</li>
+<li><code>DEPLOYER_URL</code> must be the console's public <code>https://</code> address. In the GitHub App's settings, <strong>Advanced → Recent deliveries</strong> shows whether GitHub reached it.</li>
+</ul>
+<h3>The new version is rolled back</h3>
+<p>It didn't answer its health page within 2 minutes. Check the port the app listens on matches the service's port (the app gets <code>PORT</code>), the health page returns a status under 400, and look at <strong>Logs</strong> for crashes. A failed pre-deploy command also keeps the old version; its output is in History.</p>
+
+<h2>HTTPS and domains</h2>
+<ul>
+<li>The DNS record must point at the server before a certificate can be issued. Fix it, then press <strong>Retry HTTPS</strong>.</li>
+<li><code>dig +short &lt;domain&gt;</code> should show the server's IP (or the CNAME then the IP).</li>
+<li>Let's Encrypt allows about 50 new certificates per registered domain per week. If you hit it, wait, or spread services over more than one base domain.</li>
+</ul>
+
+<h2>Email</h2>
+<p>If alerts or invites don't arrive, open <strong>Monitoring → Alerts → Save and send a test email</strong>. The error says whether the SMTP server, port or sign-in is wrong. Check spam folders and that the sender address is allowed by your provider.</p>
+
+<h2>Backups</h2>
+<ul>
+<li>Press <strong>Test the bucket</strong> on the Backups page; it explains a wrong key, region or endpoint.</li>
+<li>For R2, B2, Wasabi or MinIO, the <strong>Storage address</strong> under Advanced must be set.</li>
+<li>The key needs to list, read, write and delete in the bucket.</li>
+</ul>
+
+<h2>Databases</h2>
+<h3>The app can't write: "read-only transaction"</h3>
+<p>The database reached its quota. Raise it under the database's Settings or delete data; writes come back within 5 minutes.</p>
+
+<h2>AWS plugin</h2>
+<ul>
+<li><strong>AccessDenied on Costs</strong>: the key lacks the policy, or "IAM user and role access to Billing information" is off in the account settings.</li>
+<li><strong>"Cost Explorer has no data yet"</strong>: turn it on under Billing; the first numbers take up to 24 hours.</li>
+<li><strong>Create server stuck at booting</strong>: the VM never called back. Check <code>DEPLOYER_URL</code> is public <code>https://</code>, then <strong>Discard</strong> and try again.</li>
+</ul>
+
+<h2>The console itself</h2>
+<pre><code>cd /opt/deployer
+sudo docker compose ps
+sudo docker compose logs --tail 200 app
+sudo docker compose logs --tail 100 caddy</code></pre>
+<p>If you've lost every owner's two-step device, another owner can reset it under People. If there's no other owner, ask for help in a GitHub issue (don't post secrets).</p>
+
+<h2>Known limits</h2>
+<ul>
+<li>One operation runs at a time across all servers (app builds run on GitHub, outside that queue).</li>
+<li>While a new app version starts, the app is briefly unavailable.</li>
+<li>Apps and images have no volumes yet; data belongs in a database.</li>
+<li>Certificates are per address, within Let's Encrypt's weekly limits.</li>
+<li>Default server folder and container prefix are <code>/opt/avrosphere</code> and <code>avrosphere</code> unless you set <code>AGENT_ROOT</code> and <code>AGENT_NAMESPACE</code>.</li>
+</ul>

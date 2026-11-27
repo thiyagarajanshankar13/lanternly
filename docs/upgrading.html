@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upgrading Lanternly · Lanternly docs</title>
+<meta name="description" content="How to update the console and clubctl to a new Lanternly release, and what happens to the database.">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Upgrading Lanternly · Lanternly docs">
+<meta property="og:description" content="How to update the console and clubctl to a new Lanternly release, and what happens to the database.">
+<meta name="theme-color" content="#0f0f11">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the page</a>
+<header class="top">
+<div class="top-in">
+<button class="menu-btn" type="button" aria-controls="side" aria-expanded="false" aria-label="Menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../"><svg width="28" height="28" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lfn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fde68a"/><stop offset="0.45" stop-color="#fbbf24"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs><path d="M26 12a6 6 0 0 1 12 0" fill="none" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round"/><rect x="19" y="12" width="26" height="6" rx="3" fill="#fbbf24"/><rect x="16.5" y="19.5" width="31" height="30" rx="9" fill="#1c1c20" stroke="#fbbf24" stroke-width="3"/><path d="M32 25c5 6 7 10 7 14a7 7 0 0 1-14 0c0-4 2-8 7-14z" fill="url(#lfn)"/><rect x="20" y="51" width="24" height="5" rx="2.5" fill="#fbbf24"/></svg><span>Lanternly</span><span class="brand-docs">Docs</span></a>
+<div class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search the docs" autocomplete="off" aria-label="Search the docs"><kbd>/</kbd><div id="results" class="results" role="listbox" hidden></div></div>
+<nav class="top-links" aria-label="Site"><a href="../">Home</a><a href="https://github.com/thiyagarajanshankar13/lanternly">GitHub</a></nav>
+</div>
+</header>
+<div class="wrap">
+<aside id="side" class="side"><nav aria-label="Documentation"><div class="nav-group"><p class="nav-head">Get started</p><ul><li><a href="./">Introduction</a></li><li><a href="quick-start.html">Quick start</a></li><li><a href="install.html">Install on your servers</a></li><li><a href="concepts.html">How it fits together</a></li></ul></div><div class="nav-group"><p class="nav-head">Run things</p><ul><li><a href="servers.html">Servers</a></li><li><a href="github-apps.html">Apps from GitHub</a></li><li><a href="docker-images.html">Docker images</a></li><li><a href="postgres.html">PostgreSQL</a></li><li><a href="s3-storage.html">S3 storage (MinIO) <span class="pill">soon</span></a></li><li><a href="domains.html">Domains and HTTPS</a></li></ul></div><div class="nav-group"><p class="nav-head">Keep it safe</p><ul><li><a href="backups.html">Backups</a></li><li><a href="monitoring.html">Monitoring</a></li><li><a href="people.html">People and access</a></li><li><a href="security.html">Security</a></li></ul></div><div class="nav-group"><p class="nav-head">Configure</p><ul><li><a href="settings.html">Settings and branding</a></li><li><a href="plugins.html">Plugins</a></li><li><a href="aws.html">Amazon Web Services plugin</a></li><li><a href="configuration.html">Configuration reference</a></li></ul></div><div class="nav-group"><p class="nav-head">Help</p><ul><li><a href="upgrading.html" aria-current="page">Upgrading Lanternly</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="contributing.html">Contributing</a></li></ul></div></nav></aside>
+<main id="content" class="content">
+<p class="crumb">Help</p>
+<article class="doc">
+<h1>Upgrading Lanternly</h1>
+<p class="lead">An upgrade has two parts: the console on the deployer VM, and <code>clubctl</code> on each services VM when a release changes it. Your services keep running throughout.</p>
+
+<h2 id="before-you-upgrade"><a class="anchor" href="#before-you-upgrade" aria-hidden="true" tabindex="-1">#</a>Before you upgrade</h2>
+<ul>
+<li>Read the release notes. They say when servers need the new <code>clubctl</code>, and about any new required setting.</li>
+<li>Copy <code>/opt/deployer/data</code> somewhere safe (it's small). The console's database is migrated forward on start and can't be migrated back.</li>
+</ul>
+
+<h2 id="upgrade-the-console"><a class="anchor" href="#upgrade-the-console" aria-hidden="true" tabindex="-1">#</a>Upgrade the console</h2>
+<h3 id="with-github-actions"><a class="anchor" href="#with-github-actions" aria-hidden="true" tabindex="-1">#</a>With GitHub Actions</h3>
+<p>If you use the <strong>Deploy the deployer</strong> workflow, merge the new release into your copy's <code>main</code> branch. The workflow builds the image and restarts the console.</p>
+<h3 id="by-hand"><a class="anchor" href="#by-hand" aria-hidden="true" tabindex="-1">#</a>By hand</h3>
+<pre><code>cd lanternly
+git pull
+sudo docker build -t deployer .
+cd /opt/deployer &amp;&amp; sudo env DEPLOYER_IMAGE=deployer docker compose up -d</code></pre>
+<p>On start, the console applies any new database migrations (they're numbered and only ever added, never edited). Operations that were running when it stopped are picked up again.</p>
+
+<h2 id="update-clubctl-on-servers"><a class="anchor" href="#update-clubctl-on-servers" aria-hidden="true" tabindex="-1">#</a>Update clubctl on servers</h2>
+<p>When the release notes say so, run the setup again on each services VM with the new <code>agent/</code> folder (same values as the first time), or run the <strong>Set up a VM</strong> workflow for it. Running containers aren't recreated.</p>
+<pre><code>sudo DEPLOYER_PUBLIC_KEY="ssh-ed25519 AAAA… deployer" \
+     ACME_EMAIL=you@example.com ./setup-clubs-vm.sh</code></pre>
+<p>Servers keep their <code>AGENT_ROOT</code> and <code>AGENT_NAMESPACE</code> from <code>agent.conf</code>, so you don't need to pass them again.</p>
+<p>Servers made by the AWS plugin are updated the same way (point the workflow at the server's address).</p>
+
+<h2 id="upgrading-ubuntu-or-docker"><a class="anchor" href="#upgrading-ubuntu-or-docker" aria-hidden="true" tabindex="-1">#</a>Upgrading Ubuntu or Docker</h2>
+<p>Normal OS updates are fine. For a reboot, the containers restart by themselves. For a bigger change, such as a new Ubuntu release, it's often easier to create a fresh server, restore each service onto it as a copy, move domains and remove the old one.</p>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a class="prev" href="configuration.html"><span>Previous</span>Configuration reference</a><a class="next" href="troubleshooting.html"><span>Next</span>Troubleshooting</a></nav>
+<p class="edit"><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/gh-pages/docs-src/pages/upgrading.html">Edit this page on GitHub</a></p>
+<footer class="foot"><span>Lanternly · AGPL-3.0</span><a href="https://github.com/thiyagarajanshankar13/lanternly">GitHub</a><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/SECURITY.md">Security policy</a><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/CONTRIBUTING.md">Contributing</a></footer>
+</main>
+<nav class="toc" aria-label="On this page"><p class="nav-head">On this page</p><ul><li><a href="#before-you-upgrade">Before you upgrade</a></li><li><a href="#upgrade-the-console">Upgrade the console</a></li><li><a href="#update-clubctl-on-servers">Update clubctl on servers</a></li><li><a href="#upgrading-ubuntu-or-docker">Upgrading Ubuntu or Docker</a></li></ul></nav>
+</div>
+<script src="docs.js" defer></script>
+</body>
+</html>

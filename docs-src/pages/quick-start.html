@@ -1,0 +1,46 @@
+<!-- title: Quick start | desc: Run the Lanternly console on your own computer in practice mode, with a simulated server and GitHub, in about five minutes. -->
+<p class="lead">Run the console on your own computer to look around before you set up any servers. Practice mode simulates the services VM and GitHub, so every screen works.</p>
+
+<h2>What you need</h2>
+<ul>
+<li>Node.js 20 or newer and npm</li>
+<li>Git</li>
+<li>OpenSSL (to make two random values)</li>
+</ul>
+
+<h2>Run it</h2>
+<ol class="steps">
+<li><p><strong>Get the code.</strong></p>
+<pre><code>git clone https://github.com/thiyagarajanshankar13/lanternly.git
+cd lanternly
+npm install</code></pre></li>
+<li><p><strong>Make a settings file.</strong> Copy the example and fill in three values.</p>
+<pre><code>cp .env.example .env.local</code></pre>
+<pre><code><span class="c"># .env.local</span>
+DEPLOYER_SECRET_KEY=<span class="k">&lt;output of: openssl rand -hex 32&gt;</span>
+DEPLOYER_SETUP_TOKEN=<span class="k">&lt;output of: openssl rand -hex 16&gt;</span>
+DEPLOYER_FAKE_ENGINE=1</code></pre></li>
+<li><p><strong>Start it.</strong></p>
+<pre><code>npm run dev</code></pre>
+<p>Open <a href="http://localhost:3100/admin">http://localhost:3100/admin</a>.</p></li>
+<li><p><strong>Create the first owner.</strong> Enter the setup code (your <code>DEPLOYER_SETUP_TOKEN</code>), your name, email and a password, then scan the QR code with an authenticator app (1Password, Google Authenticator, Authy…) and type the 6-digit code.</p></li>
+<li><p><strong>Look around.</strong> Practice mode comes with a pretend server and three pretend GitHub repos. Try:</p>
+<ul>
+<li><strong>Projects → New project</strong>, then <strong>New service → PostgreSQL database</strong>.</li>
+<li><strong>New service → App from GitHub</strong>, pick a repo and tick the database. Builds finish at once.</li>
+<li><strong>New service → Docker image</strong> with <code>nginx:1.27</code>.</li>
+<li><strong>Monitoring</strong>, <strong>Backups</strong> and <strong>People</strong>.</li>
+</ul></li>
+</ol>
+
+<div class="note"><b class="t">Practice mode is only for trying things</b><p>With <code>DEPLOYER_FAKE_ENGINE=1</code> nothing is really created and the AWS plugin's Costs page shows made-up numbers. Leave it unset on a real install.</p></div>
+
+<h2>Try clubctl for real</h2>
+<p>To see the server side work on a machine with Docker (a spare VM or a Linux laptop), run the services setup locally and use names under <code>.localhost</code>:</p>
+<pre><code>sudo ./agent/setup-clubs-vm.sh</code></pre>
+
+<h2>Next steps</h2>
+<div class="cards">
+<a class="card" href="install.html"><b>Install on your servers</b><span>The real thing: DNS, two VMs and your first deploy.</span></a>
+<a class="card" href="concepts.html"><b>Learn the concepts</b><span>What servers, projects, services and operations are.</span></a>
+</div>

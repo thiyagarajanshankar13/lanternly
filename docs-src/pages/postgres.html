@@ -1,0 +1,60 @@
+<!-- title: PostgreSQL | desc: Create PostgreSQL databases in a project, link them to apps, reveal and rotate passwords, upgrade versions, load and download dumps, and set size quotas. -->
+<p class="lead">Each PostgreSQL database runs in its own container with a volume and a health check, on its project's private network. It has no address on the internet, and its password never leaves the server unless someone asks to see it.</p>
+
+<h2>Create a database</h2>
+<ol class="steps">
+<li>Open a project and press <strong>New service → PostgreSQL database</strong>.</li>
+<li>Give it a <strong>name</strong>, such as <code>shop-db</code>. Apps reach it at <code>shop-db:5432</code>.</li>
+<li>Pick a <strong>version</strong> (16 by default).</li>
+<li>Under <strong>Size and limits</strong>, change the memory (default 256 MB) and the disk quota (default 5 GB) if you like.</li>
+<li>Press <strong>Create database</strong>. It's ready in a few seconds.</li>
+</ol>
+<p>The engine is tuned to its memory: <code>shared_buffers</code> is a quarter of it, and <code>max_connections</code> grows with it (20 to 200).</p>
+<p>Several apps can share one database. Add a second only when you want separate data; its suggested name is then <code>&lt;project&gt;-db-2</code>.</p>
+
+<h2>Link a database to an app</h2>
+<p>In the app's <strong>Settings</strong>, tick the database under <strong>Databases</strong>. The app restarts with these settings:</p>
+<pre><code>DATABASE_URL=postgres://…@shop-db:5432/…
+PGHOST=shop-db
+PGPORT=5432
+PGUSER=…
+PGPASSWORD=…
+PGDATABASE=…</code></pre>
+<p>For a second database, give it a <strong>prefix</strong> such as <code>ANALYTICS_</code>: the app then gets <code>ANALYTICS_DATABASE_URL</code> and so on.</p>
+<p>You can also use a database's values inside any setting:</p>
+<pre><code>REPORTS_URL=${{shop-db.DATABASE_URL}}</code></pre>
+<p>Both are filled in on the server, so the password never appears in the app's settings in the console.</p>
+
+<h2>The database's page</h2>
+<ul>
+<li><strong>Connect</strong> shows the variables an app needs, with the password hidden. <strong>Reveal</strong> reads it from the server; every reveal is written to the access log.</li>
+<li><strong>Back up</strong> takes a copy now. Copies are also taken on the backup schedule (see <a href="backups.html">Backups</a>).</li>
+<li><strong>Pause</strong> stops the database; apps using it stop working until <strong>Resume</strong>.</li>
+<li><strong>Settings</strong>: display name, memory, quota and notes.</li>
+<li><strong>More → Download a dump</strong>: a <code>pg_dump</code> custom-format file you can load on your computer with <code>pg_restore</code>.</li>
+<li><strong>More → Load a dump</strong>: replace the data with a <code>pg_dump -Fc</code> file up to 2 GB. A backup is taken first, and linked apps restart afterwards.</li>
+<li><strong>More → New password</strong>: rotates the password and restarts the apps that use it.</li>
+<li><strong>More → Newer PostgreSQL</strong>: upgrades to a newer major version by dump and restore. If anything fails, the old version stays.</li>
+<li><strong>More → Move to project</strong> and <strong>Remove</strong> (owners only; a final dump is kept on the server). A database still linked by apps can't be removed or moved.</li>
+</ul>
+
+<h2>Working on the data from your computer</h2>
+<p>The database has no public port. Download a dump and restore it locally:</p>
+<pre><code>createdb shop_copy
+pg_restore --no-owner -d shop_copy shop-db.dump</code></pre>
+<p>To push data in, make a dump with <code>pg_dump -Fc</code> and use <strong>Load a dump</strong>.</p>
+
+<h2>Quota and full databases</h2>
+<p>Size is checked every 5 minutes against the quota.</p>
+<ul>
+<li>At <strong>80%</strong> the alert addresses get an email.</li>
+<li>At <strong>100%</strong> the database becomes read-only (apps can read but not write) and another email goes out.</li>
+<li>Raise the quota in Settings or delete data, and it can write again within 5 minutes.</li>
+</ul>
+<p>The quota is a soft limit enforced with PostgreSQL's <code>default_transaction_read_only</code>, not a disk limit.</p>
+
+<h2>Limits</h2>
+<ul>
+<li>One database per container. No outside port: use dumps.</li>
+<li>No point-in-time recovery: backups are scheduled dumps.</li>
+</ul>
