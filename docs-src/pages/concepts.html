@@ -19,19 +19,20 @@
 <ul>
 <li><strong>On the web</strong>: apps with a web address.</li>
 <li><strong>Inside the project</strong>: services with no address, such as a worker or Redis. Only the project's other services reach them.</li>
-<li><strong>Databases</strong>: the project's PostgreSQL databases.</li>
+<li><strong>Data</strong>: the project's PostgreSQL databases and S3 storage.</li>
 </ul>
-<p>A line runs from each app to the databases it uses. Click a service to see its status, addresses, image or version, size, memory and links beside the diagram; <strong>Open service</strong> goes to its own page. On a phone the diagram becomes a list. The Projects list shows a small map of each project, its health and, with the AWS plugin, a monthly estimate; <strong>Needs attention</strong> filters to projects with a failed or stopped service or a nearly full database.</p>
+<p>A line runs from each app to the databases and storage it uses. Click a service to see its status, addresses, image or version, size, memory and links beside the diagram; <strong>Open service</strong> goes to its own page. On a phone the diagram becomes a list. The Projects list shows a small map of each project, its health and, with the AWS plugin, a monthly estimate; <strong>Needs attention</strong> filters to projects with a failed or stopped service or a nearly full database.</p>
 
 <h2>Services</h2>
-<p>A service is one running thing in a project. The core has three kinds:</p>
+<p>A service is one running thing in a project. The core has four kinds:</p>
 <div class="table"><table>
 <tr><th>Kind</th><th>Comes from</th><th>Page</th></tr>
 <tr><td>App from GitHub</td><td>A repo and branch with a Dockerfile, built on GitHub Actions</td><td><a href="github-apps.html">Apps from GitHub</a></td></tr>
 <tr><td>Docker image</td><td>A ready-made image from any registry</td><td><a href="docker-images.html">Docker images</a></td></tr>
 <tr><td>PostgreSQL</td><td>The official <code>postgres</code> image, managed for you</td><td><a href="postgres.html">PostgreSQL</a></td></tr>
+<tr><td>S3 storage</td><td>MinIO with buckets, managed for you</td><td><a href="s3-storage.html">S3 storage</a></td></tr>
 </table></div>
-<p>S3 storage (MinIO) is on its way as a fourth kind (<a href="s3-storage.html">S3 storage</a>), and plugins can add their own (<a href="plugins.html">Plugins</a>).</p>
+<p>Plugins can add their own kinds (<a href="plugins.html">Plugins</a>).</p>
 <p>Every service has a page with its status, <strong>Logs</strong> (latest lines or <strong>Live</strong>, with secrets masked), <strong>History</strong> (every change with its output and who made it), <strong>Pause</strong>/<strong>Resume</strong> and <strong>Settings</strong>.</p>
 
 <h2>Operations</h2>

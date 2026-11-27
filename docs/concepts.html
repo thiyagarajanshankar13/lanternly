@@ -28,7 +28,7 @@
 </div>
 </header>
 <div class="wrap">
-<aside id="side" class="side"><nav aria-label="Documentation"><div class="nav-group"><p class="nav-head">Get started</p><ul><li><a href="./">Introduction</a></li><li><a href="quick-start.html">Quick start</a></li><li><a href="install.html">Install on your servers</a></li><li><a href="concepts.html" aria-current="page">How it fits together</a></li></ul></div><div class="nav-group"><p class="nav-head">Run things</p><ul><li><a href="servers.html">Servers</a></li><li><a href="github-apps.html">Apps from GitHub</a></li><li><a href="docker-images.html">Docker images</a></li><li><a href="postgres.html">PostgreSQL</a></li><li><a href="s3-storage.html">S3 storage (MinIO) <span class="pill">soon</span></a></li><li><a href="domains.html">Domains and HTTPS</a></li></ul></div><div class="nav-group"><p class="nav-head">Keep it safe</p><ul><li><a href="backups.html">Backups</a></li><li><a href="monitoring.html">Monitoring</a></li><li><a href="people.html">People and access</a></li><li><a href="security.html">Security</a></li></ul></div><div class="nav-group"><p class="nav-head">Configure</p><ul><li><a href="settings.html">Settings and branding</a></li><li><a href="plugins.html">Plugins</a></li><li><a href="aws.html">Amazon Web Services plugin</a></li><li><a href="configuration.html">Configuration reference</a></li></ul></div><div class="nav-group"><p class="nav-head">Help</p><ul><li><a href="upgrading.html">Upgrading Lanternly</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="contributing.html">Contributing</a></li></ul></div></nav></aside>
+<aside id="side" class="side"><nav aria-label="Documentation"><div class="nav-group"><p class="nav-head">Get started</p><ul><li><a href="./">Introduction</a></li><li><a href="quick-start.html">Quick start</a></li><li><a href="install.html">Install on your servers</a></li><li><a href="concepts.html" aria-current="page">How it fits together</a></li></ul></div><div class="nav-group"><p class="nav-head">Run things</p><ul><li><a href="servers.html">Servers</a></li><li><a href="github-apps.html">Apps from GitHub</a></li><li><a href="docker-images.html">Docker images</a></li><li><a href="postgres.html">PostgreSQL</a></li><li><a href="s3-storage.html">S3 storage (MinIO)</a></li><li><a href="domains.html">Domains and HTTPS</a></li></ul></div><div class="nav-group"><p class="nav-head">Keep it safe</p><ul><li><a href="backups.html">Backups</a></li><li><a href="monitoring.html">Monitoring</a></li><li><a href="people.html">People and access</a></li><li><a href="security.html">Security</a></li></ul></div><div class="nav-group"><p class="nav-head">Configure</p><ul><li><a href="settings.html">Settings and branding</a></li><li><a href="plugins.html">Plugins</a></li><li><a href="aws.html">Amazon Web Services plugin</a></li><li><a href="configuration.html">Configuration reference</a></li></ul></div><div class="nav-group"><p class="nav-head">Help</p><ul><li><a href="upgrading.html">Upgrading Lanternly</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="contributing.html">Contributing</a></li></ul></div></nav></aside>
 <main id="content" class="content">
 <p class="crumb">Get started</p>
 <article class="doc">
@@ -53,19 +53,20 @@
 <ul>
 <li><strong>On the web</strong>: apps with a web address.</li>
 <li><strong>Inside the project</strong>: services with no address, such as a worker or Redis. Only the project's other services reach them.</li>
-<li><strong>Databases</strong>: the project's PostgreSQL databases.</li>
+<li><strong>Data</strong>: the project's PostgreSQL databases and S3 storage.</li>
 </ul>
-<p>A line runs from each app to the databases it uses. Click a service to see its status, addresses, image or version, size, memory and links beside the diagram; <strong>Open service</strong> goes to its own page. On a phone the diagram becomes a list. The Projects list shows a small map of each project, its health and, with the AWS plugin, a monthly estimate; <strong>Needs attention</strong> filters to projects with a failed or stopped service or a nearly full database.</p>
+<p>A line runs from each app to the databases and storage it uses. Click a service to see its status, addresses, image or version, size, memory and links beside the diagram; <strong>Open service</strong> goes to its own page. On a phone the diagram becomes a list. The Projects list shows a small map of each project, its health and, with the AWS plugin, a monthly estimate; <strong>Needs attention</strong> filters to projects with a failed or stopped service or a nearly full database.</p>
 
 <h2 id="services"><a class="anchor" href="#services" aria-hidden="true" tabindex="-1">#</a>Services</h2>
-<p>A service is one running thing in a project. The core has three kinds:</p>
+<p>A service is one running thing in a project. The core has four kinds:</p>
 <div class="table"><table>
 <tr><th>Kind</th><th>Comes from</th><th>Page</th></tr>
 <tr><td>App from GitHub</td><td>A repo and branch with a Dockerfile, built on GitHub Actions</td><td><a href="github-apps.html">Apps from GitHub</a></td></tr>
 <tr><td>Docker image</td><td>A ready-made image from any registry</td><td><a href="docker-images.html">Docker images</a></td></tr>
 <tr><td>PostgreSQL</td><td>The official <code>postgres</code> image, managed for you</td><td><a href="postgres.html">PostgreSQL</a></td></tr>
+<tr><td>S3 storage</td><td>MinIO with buckets, managed for you</td><td><a href="s3-storage.html">S3 storage</a></td></tr>
 </table></div>
-<p>S3 storage (MinIO) is on its way as a fourth kind (<a href="s3-storage.html">S3 storage</a>), and plugins can add their own (<a href="plugins.html">Plugins</a>).</p>
+<p>Plugins can add their own kinds (<a href="plugins.html">Plugins</a>).</p>
 <p>Every service has a page with its status, <strong>Logs</strong> (latest lines or <strong>Live</strong>, with secrets masked), <strong>History</strong> (every change with its output and who made it), <strong>Pause</strong>/<strong>Resume</strong> and <strong>Settings</strong>.</p>
 
 <h2 id="operations"><a class="anchor" href="#operations" aria-hidden="true" tabindex="-1">#</a>Operations</h2>

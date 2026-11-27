@@ -15,6 +15,7 @@
 <li><strong>Deploy from GitHub.</strong> Any repo and branch with a <code>Dockerfile</code>. Images are built on GitHub Actions, every push can deploy itself, and Roll back starts an earlier version without rebuilding. <a href="github-apps.html">Apps from GitHub</a></li>
 <li><strong>Run any Docker image.</strong> Docker Hub, ghcr.io or a private registry, pinned to the exact digest that was pulled. <a href="docker-images.html">Docker images</a></li>
 <li><strong>Group services into projects.</strong> Each project has its own private network: services find each other by name, and projects can't see each other. <a href="concepts.html#projects">Projects</a></li>
+<li><strong>S3 storage on your own server.</strong> MinIO buckets per project, public or private, linked to apps with the usual <code>S3_*</code> and <code>AWS_*</code> settings. <a href="s3-storage.html">S3 storage</a></li>
 <li><strong>PostgreSQL, looked after.</strong> One tick links a database to an app. Password rotation, major-version upgrades with roll back, dumps, and a size quota with alerts. <a href="postgres.html">PostgreSQL</a></li>
 <li><strong>HTTPS and your own domains.</strong> Every service gets an address under your domain with a free certificate, and a CNAME adds a custom domain. <a href="domains.html">Domains and HTTPS</a></li>
 <li><strong>Encrypted backups to any S3 bucket.</strong> AWS S3, Backblaze B2, Cloudflare R2, MinIO and others, encrypted before upload, on a schedule, restorable into a copy first. <a href="backups.html">Backups</a></li>
