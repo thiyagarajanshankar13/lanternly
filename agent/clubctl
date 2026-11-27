@@ -1,0 +1,1200 @@
+#!/usr/bin/env bash
+# clubctl: manages Avrosphere club instances on a clubs VM.
+#
+# Installed at /opt/avrosphere/bin/clubctl by setup-clubs-vm.sh and run as
+# root. The deployer app calls it over SSH (see clubctl-ssh), never a shell.
+#
+#   clubctl host                        host memory/disk as JSON
+#   clubctl status                      every club as JSON lines
+#   clubctl create  NAME IMAGE DOMAINS  settings on stdin (KEY=value lines)
+#   clubctl configure NAME DOMAINS      new settings on stdin, restarts the club
+#   clubctl upgrade NAME IMAGE          backup, migrate, start, roll back on failure
+#   clubctl pause   NAME                stop the club, show a "paused" page
+#   clubctl resume  NAME
+#   clubctl backup  NAME                database dump into /opt/avrosphere/backups
+#   clubctl remove  NAME                final backup, then delete database + files
+#   clubctl logs    NAME [LINES]
+#   clubctl logs-follow NAME [LINES]    the last LINES, then new lines as they come (stops after 30 minutes)
+#   clubctl https   NAME                say which addresses have a certificate, make Caddy retry the rest now
+#
+# Apps (a container built from a GitHub repo, kind "app"; no database, no files):
+#   clubctl app-create NAME IMAGE DOMAINS  settings on stdin, starts it, routes it
+#   clubctl app-deploy NAME IMAGE          start IMAGE, back to the previous one on failure
+#   configure / pause / resume / remove / logs / status work for apps too.
+#
+# Projects (a group of services on their own Docker network, proj-PROJECT;
+# Caddy joins every one, services reach each other by name):
+#   clubctl project-set NAME PROJECT    move a service to a project's network (no restart)
+#   Settings lines CLUBCTL_PROJECT=<project> on create / configure / app-create / db-create do the same.
+#
+# PostgreSQL services (kind "postgres": own container, data in pgdata/, project network only):
+#   clubctl db-create NAME IMAGE        IMAGE = postgres:16 or postgres:17; settings on stdin
+#   clubctl db-stats NAME               size, connections and state as JSON
+#   clubctl db-credentials NAME         DATABASE_URL and PG* lines (for "Reveal")
+#   clubctl db-rotate NAME              new password (restart the apps that use it afterwards)
+#   clubctl db-readonly NAME on|off     stop writes when it is over its quota
+#   clubctl db-upgrade NAME IMAGE       move to another major version by dump and restore, undo on failure
+#   configure (DOMAINS = -) / pause / resume / remove / logs / dump / restore-* work for databases too.
+#
+# Apps in a project get, on top of their settings:
+#   CLUBCTL_LINK=<database>:<PREFIX>   PREFIX + DATABASE_URL, PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE
+#   ${{<database>.<VAR>}} inside a value is replaced by that variable of a database in the same project
+#   CLUBCTL_PREDEPLOY_B64=<base64>     a command run once in each new version before it starts
+#
+# Off-site backups (the deployer streams these over SSH and does the storing,
+# encrypting and scheduling, so this VM never holds bucket keys):
+#   clubctl info    NAME                image, image digest and state as JSON
+#   clubctl dump    NAME                database (pg_dump custom format) to stdout
+#   clubctl secrets NAME                the club's PAYLOAD_SECRET and MAIL_ENCRYPTION_KEY lines
+#   clubctl files-index NAME            "path<TAB>size<TAB>sha256" for every uploaded file
+#   clubctl files-pack  NAME            paths on stdin → file frames on stdout
+#   clubctl restore-stage NAME          a backup as frames on stdin → staged next to the club
+#   clubctl restore-apply NAME IMAGE [copy]   swap the staged backup in, start, undo on failure
+#   clubctl restore-abort NAME          throw away a staged backup
+#   clubctl image-save IMAGE            docker save | gzip to stdout
+#   clubctl image-load                  gzip'd docker save on stdin
+#
+# Frames (one per item, a header line then exactly SIZE bytes):
+#   F SIZE PATH      a file under data/ (PATH relative, no newline or tab)
+#   C SHA256 PATH    restore only: copy the club's current file with that content
+#   D SIZE           restore only: the database dump
+#   S SIZE           restore only: KEY=value lines for PAYLOAD_SECRET / MAIL_ENCRYPTION_KEY
+#   E                end
+#
+# DOMAINS is a comma-separated list; the first is the club's main address.
+# Settings lines starting with CLUBCTL_ are for clubctl itself:
+#   CLUBCTL_ADMIN_EMAIL / CLUBCTL_ADMIN_PASSWORD / CLUBCTL_ADMIN_NAME  first admin (create only)
+#   CLUBCTL_MEMORY_MB                                                   container memory limit
+#   CLUBCTL_PORT / CLUBCTL_HEALTH_PATH                                  apps: the port it listens on, its "I'm up" page
+# Debugging: CLUBCTL_KEEP_FAILED=1 keeps a failed create in place for inspection.
+#
+# Layout (same as avrosphere's deploy/lightsail/server/deploy.sh):
+#   /opt/avrosphere/clubs/NAME/{settings.env,secrets.env,app.env,domains,data/,.image,.state}
+#   /opt/avrosphere/base/sites/NAME.caddy
+#   apps: the same folder with .kind (= app), .port, .health and no data/ or secrets.env
+#   databases: .kind (= postgres), secrets.env (PGUSER/PGPASSWORD/PGDATABASE), pg.env, pgdata/
+#   every service: .project (its project, so its network is proj-<project>)
+set -euo pipefail
+umask 077
+
+# ── Names and folders ─────────────────────────────────────────────────────────
+# Set once per server by setup-clubs-vm.sh in <ROOT>/agent.conf. A server set up
+# before that file existed has none, and gets exactly the names it always had
+# (compatibility mode): /opt/avrosphere, avrosphere-<name> containers, the
+# avrosphere network and avro-apps.
+#   NAMESPACE   prefix of containers, compose projects and labels (NAMESPACE-<name>, NAMESPACE.club)
+#   SHARED_NET  the network of the shared Postgres and the Avrosphere sites
+#   APPS_NET    the network of apps made before projects
+ROOT="${CLUBCTL_ROOT:-}"
+if [[ -z "$ROOT" ]]; then
+  ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+  [[ -f "$ROOT/agent.conf" ]] || ROOT=/opt/avrosphere
+fi
+NAMESPACE=avrosphere
+SHARED_NET=avrosphere
+APPS_NET=avro-apps
+if [[ -f "$ROOT/agent.conf" ]]; then
+  # Read, never sourced: only these keys, only plain names.
+  while IFS='=' read -r _k _v; do
+    case "$_k" in
+      NAMESPACE|SHARED_NET|APPS_NET)
+        [[ "$_v" =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "clubctl: bad $_k in $ROOT/agent.conf" >&2; exit 1; }
+        printf -v "$_k" '%s' "$_v" ;;
+    esac
+  done < "$ROOT/agent.conf"
+  unset _k _v
+fi
+FILES="$ROOT/bin/files"
+PG="$NAMESPACE-postgres"
+CADDY="$NAMESPACE-caddy"
+LOCKDIR="$ROOT/locks"
+
+die() { echo "clubctl: $*" >&2; exit 1; }
+log() { echo "==> $*"; }
+
+valid_name()   { [[ "$1" =~ ^[a-z][a-z0-9-]{1,30}$ ]] && [[ "$1" != *- ]] && [[ "$1" != *--* ]]; }
+valid_image()  { [[ "$1" =~ ^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[a-f0-9]{64})?$ ]]; }
+valid_domain() { [[ "$1" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$ ]] && (( ${#1} <= 253 )); }
+valid_port()   { [[ "$1" =~ ^[1-9][0-9]{0,4}$ ]] && (( $1 <= 65535 )); }
+valid_health() { [[ "$1" == - || "$1" =~ ^/[A-Za-z0-9._~/-]{0,200}$ ]]; } # - = no health page: running is enough
+
+need_name() { valid_name "${1:-}" || die "bad club name: ${1:-}"; }
+club_dir()  { echo "$ROOT/clubs/$1"; }
+need_club() { need_name "$1"; [[ -d "$(club_dir "$1")" ]] || die "no such club: $1"; }
+db_name()   { echo "${1//-/_}"; }
+container() { echo "$NAMESPACE-$1"; }
+kind_of()   { cat "$(club_dir "$1")/.kind" 2>/dev/null || echo avrosphere; }
+is_app()    { [[ "$(kind_of "$1")" == app ]]; }
+is_pg()     { [[ "$(kind_of "$1")" == postgres ]]; }
+has_site()  { ! is_pg "$1"; } # databases have no web address
+need_avrosphere() { is_app "$1" && die "$1 is an app: it has no database or uploaded files" || true; }
+need_data() { is_app "$1" && die "$1 is an app: it keeps no data here" || true; }
+need_pg()   { is_pg "$1" || die "$1 isn't a database"; }
+valid_pg_image() { [[ "$1" =~ ^postgres:1[0-9]+(\.[0-9]+)?(-[a-z0-9]+)?$ ]]; }
+project_of()  { cat "$(club_dir "$1")/.project" 2>/dev/null || true; }
+project_net() { local p; p="$(project_of "$1")"; [[ -z "$p" ]] || echo "proj-$p"; }
+file_var() { sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -1; } # file_var FILE KEY
+
+# No -i: docker would swallow the settings waiting on our stdin.
+psql() { docker exec "$PG" psql -U postgres -v ON_ERROR_STOP=1 -qtA "$@" </dev/null; }
+
+with_lock() { # one operation per club at a time
+  mkdir -p "$LOCKDIR"
+  exec 9>"$LOCKDIR/$1.lock"
+  flock -w 5 9 || die "club $1 is busy with another operation"
+}
+
+compose() { # compose NAME IMAGE args...
+  local name="$1" image="$2"; shift 2
+  local dir file=docker-compose.club.yml mem=700 net; dir="$(club_dir "$name")"
+  if is_app "$name"; then file=docker-compose.app.yml; mem=256; fi
+  if is_pg "$name"; then file=docker-compose.postgres.yml; mem=256; fi
+  mem="$(cat "$dir/.memory" 2>/dev/null || echo $mem)"
+  net="$(project_net "$name")"
+  [[ -z "$net" ]] || ensure_net "$net"
+  local rc=0 extra=()
+  # Apps and databases have their project's network as their main one, which a
+  # container keeps from when it was made: after a project change, make it again.
+  if [[ " $* " == *" up "* ]] && { is_app "$name" || is_pg "$name"; }; then
+    local mode; mode="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$(container "$name")" 2>/dev/null || true)"
+    [[ -z "$mode" || "$mode" == "${net:-$APPS_NET}" ]] || extra=(--force-recreate)
+  fi
+  # Postgres sized to its memory (same sums as the deployer's pgTuning).
+  APP_NAME="$name" IMAGE="$image" MEMORY_MB="$mem" PROJECT_NET="${net:-}" \
+    NAMESPACE="$NAMESPACE" SHARED_NET="$SHARED_NET" APPS_NET="$APPS_NET" AGENT_ROOT="$ROOT" \
+    PG_SHARED_BUFFERS="$(( mem / 4 > 16 ? mem / 4 : 16 ))" PG_MAX_CONNECTIONS="$(( mem / 6 < 20 ? 20 : (mem / 6 > 200 ? 200 : mem / 6) ))" \
+    docker compose -p "$NAMESPACE-$name" -f "$FILES/$file" --project-directory "$dir" "$@" "${extra[@]}" || rc=$?
+  # Avrosphere sites join their project's network beside the shared Postgres one.
+  if (( rc == 0 )) && [[ " $* " == *" up "* ]]; then attach_project "$name"; fi
+  return $rc
+}
+
+# ── Kinds of service ──────────────────────────────────────────────────────────
+# Apps and PostgreSQL services are built in. Other kinds (Avrosphere sites) are
+# in bin/kinds/<kind>.sh, installed with the deployer plugin that uses them.
+for _kind in "$ROOT"/bin/kinds/*.sh; do
+  [[ -f "$_kind" ]] && . "$_kind"
+done
+unset _kind
+need_kind() { declare -F "${1}_create" >/dev/null || die "this server has no support for $1 services (bin/kinds/$1.sh is missing: re-run setup-clubs-vm.sh)"; }
+owned_key() { declare -F avrosphere_owned_key >/dev/null && avrosphere_owned_key "$1"; }
+
+cmd_create()  { need_kind avrosphere; avrosphere_create "$@"; }
+cmd_upgrade() { need_kind avrosphere; avrosphere_upgrade "$@"; }
+cmd_secrets() { need_kind avrosphere; avrosphere_secrets "$@"; }
+
+# ── Project networks ──────────────────────────────────────────────────────────
+on_net() { [[ "$(docker inspect -f "{{if index .NetworkSettings.Networks \"$2\"}}yes{{end}}" "$1" 2>/dev/null)" == yes ]]; }
+
+ensure_net() { # the network exists and Caddy is on it
+  docker network inspect "$1" >/dev/null 2>&1 || docker network create --label "$NAMESPACE.project=1" "$1" >/dev/null
+  on_net "$CADDY" "$1" || docker network connect "$1" "$CADDY" >/dev/null 2>&1 || true
+}
+
+ensure_caddy_nets() { # after Caddy is recreated it has to rejoin every project's network
+  local n
+  for n in $(docker network ls --filter "label=$NAMESPACE.project=1" --format '{{.Name}}' 2>/dev/null); do
+    on_net "$CADDY" "$n" || docker network connect "$n" "$CADDY" >/dev/null 2>&1 || true
+  done
+}
+
+cleanup_nets() { # project networks nothing but Caddy uses any more
+  local n left
+  for n in $(docker network ls --filter "label=$NAMESPACE.project=1" --format '{{.Name}}' 2>/dev/null); do
+    left="$(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$n" 2>/dev/null | tr ' ' '\n' | grep -vx "$CADDY" | grep -c . || true)"
+    if [[ "$left" == 0 ]]; then
+      docker network disconnect "$n" "$CADDY" >/dev/null 2>&1 || true
+      docker network rm "$n" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
+attach_project() { # puts a running service on its project's network, and off every other project's
+  local name="$1" net c other; net="$(project_net "$name")"; c="$(container "$name")"
+  [[ -n "$net" ]] || return 0
+  docker inspect "$c" >/dev/null 2>&1 || return 0
+  ensure_net "$net"
+  on_net "$c" "$net" || docker network connect --alias "$name" "$net" "$c" >/dev/null
+  for other in $(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$c" 2>/dev/null); do
+    [[ "$other" == "$net" ]] && continue
+    # Avrosphere sites keep the shared Postgres network; apps leave the old shared apps network.
+    if [[ "$other" == proj-* || ( "$other" == "$APPS_NET" && "$(kind_of "$name")" == app ) ]]; then
+      docker network disconnect "$other" "$c" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
+take_project() { # take_project DIR: CLUBCTL_PROJECT from the last read_settings
+  local p; p="$(clubctl_var "$1" CLUBCTL_PROJECT)"
+  [[ -z "$p" ]] && return 0
+  valid_name "$p" || die "bad project name: $p"
+  echo "$p" > "$1/.project"
+}
+
+take_app_links() { # take_app_links DIR: CLUBCTL_LINK lines and the pre-deploy command
+  local dir="$1" l cmd
+  grep -q '^CLUBCTL_PREDEPLOY_B64=' "$dir/.clubctl.new" 2>/dev/null || return 0 # an older deployer: keep what's there
+  : > "$dir/.links.new"
+  while IFS= read -r l; do
+    [[ "$l" =~ ^[a-z][a-z0-9-]{1,30}:([A-Z][A-Z0-9_]*_)?$ ]] || die "bad database link: ${l:0:60}"
+    echo "$l" >> "$dir/.links.new"
+  done < <(sed -n 's/^CLUBCTL_LINK=//p' "$dir/.clubctl.new")
+  mv "$dir/.links.new" "$dir/.links"
+  cmd="$(clubctl_var "$dir" CLUBCTL_PREDEPLOY_B64)"
+  if [[ -z "$cmd" ]]; then rm -f "$dir/.predeploy"; return 0; fi
+  [[ "$cmd" =~ ^[A-Za-z0-9+/=]+$ ]] || die "bad pre-deploy command"
+  printf '%s' "$cmd" | base64 -d > "$dir/.predeploy" 2>/dev/null || die "bad pre-deploy command"
+  [[ "$(wc -l < "$dir/.predeploy")" == 0 ]] || die "the pre-deploy command must be one line"
+}
+
+# ── Databases as seen by apps ─────────────────────────────────────────────────
+db_var() { # db_var DB VAR: one connection variable of a database
+  local d user pass; d="$(club_dir "$1")"
+  user="$(file_var "$d/secrets.env" PGUSER)"; pass="$(file_var "$d/secrets.env" PGPASSWORD)"
+  case "$2" in
+    DATABASE_URL) echo "postgresql://$user:$pass@$1:5432/$user" ;;
+    PGHOST) echo "$1" ;;
+    PGPORT) echo 5432 ;;
+    PGUSER|PGDATABASE) echo "$user" ;;
+    PGPASSWORD) echo "$pass" ;;
+    *) die "a database has no $2" ;;
+  esac
+}
+db_vars() { # db_vars DB PREFIX: every connection variable, prefixed
+  local v
+  for v in DATABASE_URL PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE; do echo "$2$v=$(db_var "$1" "$v")"; done
+}
+same_project_db() { # same_project_db SERVICE DB: DB is a database in SERVICE's project
+  local p; p="$(project_of "$1")"
+  [[ -n "$p" && -d "$(club_dir "$2")" ]] && is_pg "$2" && [[ "$(project_of "$2")" == "$p" ]]
+}
+resolve_refs() { # resolve_refs NAME < settings: ${{db.VAR}} → its value
+  local name="$1" line full db var
+  local re='\$\{\{[[:space:]]*([a-z][a-z0-9-]*)\.([A-Z_]+)[[:space:]]*\}\}'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    while [[ "$line" =~ $re ]]; do
+      full="${BASH_REMATCH[0]}"; db="${BASH_REMATCH[1]}"; var="${BASH_REMATCH[2]}"
+      same_project_db "$name" "$db" || die "\${{$db.$var}}: there is no database $db in this service's project"
+      line="${line//"$full"/$(db_var "$db" "$var")}"
+    done
+    printf '%s\n' "$line"
+  done
+}
+link_vars() { # link_vars NAME: the variables of every database the app is connected to
+  local name="$1" l db prefix
+  [[ -f "$(club_dir "$name")/.links" ]] || return 0
+  while IFS= read -r l; do
+    [[ -n "$l" ]] || continue
+    db="${l%%:*}"; prefix="${l#*:}"
+    same_project_db "$name" "$db" || die "$name is connected to $db, which isn't a database in its project"
+    db_vars "$db" "$prefix"
+  done < "$(club_dir "$name")/.links"
+}
+
+run_predeploy() { # run_predeploy NAME IMAGE: the app's pre-deploy command, in the new image, before it starts
+  local name="$1" image="$2" dir cmd net rc=0; dir="$(club_dir "$name")"
+  [[ -s "$dir/.predeploy" ]] || return 0
+  cmd="$(cat "$dir/.predeploy")"; net="$(project_net "$name")"
+  log "Running the pre-deploy command: $cmd"
+  docker rm -f "$NAMESPACE-$name-predeploy" >/dev/null 2>&1 || true
+  timeout --foreground 900 docker run --rm --name "$NAMESPACE-$name-predeploy" --network "${net:-$APPS_NET}" \
+    --env-file "$dir/app.env" --memory "$(cat "$dir/.memory" 2>/dev/null || echo 256)m" --security-opt no-new-privileges:true \
+    --entrypoint sh "$image" -c "$cmd" </dev/null || rc=$?
+  docker rm -f "$NAMESPACE-$name-predeploy" >/dev/null 2>&1 || true
+  (( rc == 0 )) || { echo "!! The pre-deploy command failed (exit $rc)" >&2; return 1; }
+  log "The pre-deploy command finished"
+}
+
+healthy() {
+  if is_pg "$1"; then
+    local dir; dir="$(club_dir "$1")"
+    docker exec "$(container "$1")" pg_isready -q -U "$(file_var "$dir/secrets.env" PGUSER)" -d "$(file_var "$dir/secrets.env" PGDATABASE)" 2>/dev/null
+    return
+  fi
+  if is_app "$1"; then
+    # Apps can be any language, so ask from the Caddy container (busybox wget
+    # fails on any 4xx/5xx answer), over the apps network.
+    local dir; dir="$(club_dir "$1")"
+    if [[ "$(cat "$dir/.health" 2>/dev/null)" == - ]]; then
+      # No health page (Redis, workers…): up = running, not restarting, for at least 5 seconds.
+      local st started; st="$(docker inspect -f '{{.State.Running}} {{.State.Restarting}} {{.State.StartedAt}}' "$(container "$1")" 2>/dev/null)" || return 1
+      [[ "$st" == "true false "* ]] || return 1
+      started="$(date -d "${st##* }" +%s 2>/dev/null)" || return 1
+      (( $(date +%s) - started >= 5 ))
+      return
+    fi
+    docker exec "$CADDY" wget -q -T 5 -O /dev/null "http://$(container "$1"):$(cat "$dir/.port")$(cat "$dir/.health")" 2>/dev/null
+    return
+  fi
+  need_kind avrosphere
+  avrosphere_healthy "$1"
+}
+# Clubs get 4 minutes (first boot runs Next.js warm-up), apps 2.
+wait_healthy() { local i n=80; { is_app "$1" || is_pg "$1"; } && n=40; for i in $(seq 1 $n); do healthy "$1" && return 0; sleep 3; done; return 1; }
+
+ensure_apps_net() { # apps get their own network: Caddy is on it, Postgres and the clubs aren't
+  docker network inspect "$APPS_NET" >/dev/null 2>&1 || docker network create "$APPS_NET" >/dev/null
+  [[ "$(docker inspect -f "{{if index .NetworkSettings.Networks \"$APPS_NET\"}}yes{{end}}" "$CADDY" 2>/dev/null)" == yes ]] \
+    || docker network connect "$APPS_NET" "$CADDY"
+}
+
+pull_image() { # a pull that fails is fine when the image is already on this VM
+  log "Pulling $1"
+  docker pull -q "$1" >/dev/null 2>&1 || docker image inspect "$1" >/dev/null 2>&1 || die "can't pull $1 (is this VM signed in to the registry?)"
+}
+
+registry_of() { # registry_of IMAGE: docker.io unless the first part looks like a host
+  local first="${1%%/*}"
+  if [[ "$1" == */* && ( "$first" == *.* || "$first" == *:* || "$first" == localhost ) ]]; then echo "$first"; else echo docker.io; fi
+}
+
+# pull_app_image IMAGE USER TOKEN: pulls an app's image (signing in with a
+# throwaway Docker config when a user and token are given, so nothing is kept
+# on the server) and prints the image to run. An image from a registry is
+# pinned to the digest just pulled, so a roll back gets exactly this version.
+pull_app_image() {
+  local image="$1" user="${2:-}" token="${3:-}"
+  if [[ -n "$user" && -n "$token" ]]; then
+    local cfg; cfg="$(mktemp -d)"
+    log "Signing in to $(registry_of "$image") as $user" >&2
+    if ! printf '%s' "$token" | docker --config "$cfg" login -u "$user" --password-stdin "$(registry_of "$image")" >/dev/null 2>&1; then
+      rm -rf "$cfg"; die "the registry refused the user name and token for $(registry_of "$image")"
+    fi
+    log "Pulling $image" >&2
+    docker --config "$cfg" pull -q "$image" >/dev/null 2>&1 || docker image inspect "$image" >/dev/null 2>&1 || { rm -rf "$cfg"; die "can't pull $image"; }
+    rm -rf "$cfg"
+  else
+    log "Pulling $image" >&2
+    docker pull -q "$image" >/dev/null 2>&1 || docker image inspect "$image" >/dev/null 2>&1 \
+      || die "can't pull $image (check the name and tag; a private image needs a user name and access token)"
+  fi
+  # Our own GitHub builds are already one commit each; digests stay as they are.
+  if [[ "$image" == *@sha256:* || "$image" =~ /app-[a-z0-9-]+:[0-9a-f]{12}$ ]]; then echo "$image"; return; fi
+  local pinned; pinned="$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$image" 2>/dev/null | head -1)"
+  if [[ -n "$pinned" ]] && valid_image "$pinned"; then echo "Pinned to $pinned" >&2; echo "$pinned"; else echo "$image"; fi
+}
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+# Reads KEY=value lines from stdin into settings.env. Only plain env names are
+# kept, values are stored exactly as given (docker env_file "raw" format), and
+# keys clubctl owns can't be overridden.
+read_settings() { # read_settings DIR [app]
+  local dir="$1" kind="${2:-}" line key
+  : > "$dir/settings.env.new"; : > "$dir/.clubctl.new"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    key="${line%%=*}"
+    [[ "$line" == *=* && "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || die "bad settings line (want KEY=value): ${key:0:40}"
+    if [[ "$kind" == app ]]; then
+      case "$key" in
+        CLUBCTL_*) echo "$line" >> "$dir/.clubctl.new" ;;
+        PORT) ;; # clubctl sets it from CLUBCTL_PORT
+        *) echo "$line" >> "$dir/settings.env.new" ;;
+      esac
+      continue
+    fi
+    case "$key" in
+      CLUBCTL_*) echo "$line" >> "$dir/.clubctl.new" ;;
+      *) owned_key "$key" || echo "$line" >> "$dir/settings.env.new" ;;
+    esac
+  done
+  mv "$dir/settings.env.new" "$dir/settings.env"
+}
+clubctl_var() { # clubctl_var DIR KEY  (from the last read_settings)
+  sed -n "s/^$2=//p" "$1/.clubctl.new" 2>/dev/null | tail -1
+}
+setting() { sed -n "s/^$2=//p" "$1/settings.env" | tail -1; }
+
+write_app_env() { # secrets + fixed paths + the deployer's settings → app.env
+  local dir="$1" name; name="$(basename "$dir")"
+  if [[ "$(cat "$dir/.kind" 2>/dev/null)" == postgres ]]; then
+    { echo "POSTGRES_USER=$(file_var "$dir/secrets.env" PGUSER)"; echo "POSTGRES_PASSWORD=$(file_var "$dir/secrets.env" PGPASSWORD)"; echo "POSTGRES_DB=$(file_var "$dir/secrets.env" PGDATABASE)"; } > "$dir/pg.env"
+    return
+  fi
+  if [[ "$(cat "$dir/.kind" 2>/dev/null)" == app ]]; then
+    # Database values are filled in here, so passwords never leave this server.
+    local body; body="$(resolve_refs "$name" < "$dir/settings.env"; link_vars "$name")" || exit 1
+    { echo "PORT=$(cat "$dir/.port")"; printf '%s\n' "$body"; } | grep -v '^$' > "$dir/app.env"
+    return
+  fi
+  need_kind avrosphere
+  avrosphere_app_env "$dir"
+}
+
+write_domains() { # write_domains NAME "a.example,b.example"
+  local name="$1" list="$2" d dir; dir="$(club_dir "$name")"
+  # An app with no web address ("-") is only reachable inside its project.
+  if [[ "$list" == - ]] && is_app "$name"; then : > "$dir/domains"; return; fi
+  local -a ds; IFS=',' read -r -a ds <<< "$list"
+  (( ${#ds[@]} >= 1 && ${#ds[@]} <= 10 )) || die "give 1 to 10 domains"
+  for d in "${ds[@]}"; do
+    valid_domain "$d" || die "bad domain: $d"
+    # A domain can only belong to one club.
+    local other
+    for other in "$ROOT"/clubs/*/domains; do
+      [[ -f "$other" && "$other" != "$dir/domains" ]] || continue
+      grep -qxF "$d" "$other" && die "domain already in use: $d"
+    done
+  done
+  printf '%s\n' "${ds[@]}" > "$dir/domains"
+}
+
+caddy_reload() {
+  local out
+  ensure_caddy_nets
+  out="$(docker exec "$CADDY" caddy reload --config /etc/caddy/Caddyfile 2>&1)" || { echo "$out" >&2; die "Caddy refused the new routing"; }
+}
+
+write_site() { # write_site NAME running|paused
+  local name="$1" mode="$2" dir hosts port; dir="$(club_dir "$name")"
+  hosts="$(paste -sd, "$dir/domains" | sed 's/,/, /g')"
+  if [[ -z "$hosts" ]]; then rm -f "$ROOT/base/sites/$name.caddy"; caddy_reload; return; fi # no web address
+  port="$(cat "$dir/.port" 2>/dev/null || echo 3000)"
+  if [[ "$mode" == running ]]; then
+    cat > "$ROOT/base/sites/$name.caddy" <<SITE
+$hosts {
+	encode zstd gzip
+	reverse_proxy $(container "$name"):$port
+}
+SITE
+  else
+    cat > "$ROOT/base/sites/$name.caddy" <<SITE
+$hosts {
+	root * /etc/caddy/pages
+	rewrite * /paused.html
+	file_server {
+		status 503
+	}
+}
+SITE
+  fi
+  rm -f "$ROOT/base/sites/_empty.caddy"
+  caddy_reload
+}
+
+# Caddy keeps certificates in /data/caddy/certificates/<issuer>/<domain>/<domain>.crt.
+has_cert() { compgen -G "$ROOT/caddy/data/caddy/certificates/*/$1/$1.crt" >/dev/null; }
+
+cmd_https() {
+  local name="$1"; need_club "$name"; with_lock "$name"
+  local dir d missing=0; dir="$(club_dir "$name")"
+  while read -r d; do
+    [[ -n "$d" ]] || continue
+    if has_cert "$d"; then log "$d: has a certificate"; else log "$d: no certificate yet"; missing=1; fi
+  done < "$dir/domains"
+  if (( missing )); then
+    # A failed certificate request waits longer before each retry (up to a day).
+    # A forced reload restarts certificate management, so Caddy asks again now.
+    local out
+    out="$(docker exec "$CADDY" caddy reload --force --config /etc/caddy/Caddyfile 2>&1)" || { echo "$out" >&2; die "Caddy refused to reload"; }
+    log "Asked Caddy to request the missing certificates again"
+    log "The address must already point at this server, or the request fails again"
+  else
+    log "Nothing to do"
+  fi
+}
+
+dump_db() { # dump_db NAME FILE
+  docker exec "$PG" pg_dump -U postgres --no-owner --no-acl "$(db_name "$1")" | gzip > "$2"
+}
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+cmd_host() {
+  local total avail disk_total disk_avail clubs running
+  total="$(awk '/MemTotal/ {print $2*1024}' /proc/meminfo)"
+  avail="$(awk '/MemAvailable/ {print $2*1024}' /proc/meminfo)"
+  read -r disk_total disk_avail < <(df -B1 --output=size,avail "$ROOT" | tail -1)
+  clubs="$(find "$ROOT/clubs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+  running="$(docker ps --filter "label=$NAMESPACE.club" --format '{{.Names}}' | wc -l)"
+  printf '{"memTotal":%s,"memAvailable":%s,"diskTotal":%s,"diskAvailable":%s,"clubs":%s,"running":%s}\n' \
+    "$total" "$avail" "$disk_total" "$disk_avail" "$clubs" "$running"
+}
+
+cmd_status() {
+  local stats dir name image state mem running
+  stats="$(docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' 2>/dev/null || true)"
+  for dir in "$ROOT"/clubs/*/; do
+    [[ -d "$dir" ]] || continue
+    name="$(basename "$dir")"
+    image="$(cat "$dir/.image" 2>/dev/null || true)"
+    state="$(cat "$dir/.state" 2>/dev/null || echo unknown)"
+    running=false
+    [[ "$(docker inspect -f '{{.State.Running}}' "$(container "$name")" 2>/dev/null)" == true ]] && running=true
+    mem="$(awk -v n="$(container "$name")" '$1==n {print $2}' <<< "$stats")"
+    printf '{"name":"%s","kind":"%s","state":"%s","running":%s,"image":"%s","memory":"%s","domains":"%s"}\n' \
+      "$name" "$(kind_of "$name")" "$state" "$running" "$image" "$mem" "$(paste -sd, "$dir/domains" 2>/dev/null)"
+  done
+}
+
+
+cleanup_failed_create() { # EXIT trap while a create is under way
+  local name="$CREATING" dir db; dir="$(club_dir "$name")"; db="$(db_name "$name")"
+  trap - EXIT
+  [[ -z "${CLUBCTL_KEEP_FAILED:-}" ]] || { echo "clubctl: create failed (kept for inspection)" >&2; exit 1; }
+  echo "clubctl: create failed, cleaning up" >&2
+  docker rm -f "$(container "$name")" >/dev/null 2>&1 || true
+  if ! is_app "$name" && ! is_pg "$name"; then
+    psql -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)" >/dev/null 2>&1 || true
+    psql -c "DROP ROLE IF EXISTS \"$db\"" >/dev/null 2>&1 || true
+  fi
+  rm -f "$ROOT/base/sites/$name.caddy"
+  rm -rf "$dir"
+  exit 1
+}
+
+cmd_configure() {
+  local name="$1" domains="$2"; need_club "$name"
+  if is_pg "$name"; then pg_configure "$name"; return; fi
+  with_lock "$name"
+  local dir; dir="$(club_dir "$name")"
+  cp "$dir/settings.env" "$dir/settings.env.bak"; cp "$dir/domains" "$dir/domains.bak"
+  local kind=""; is_app "$name" && kind=app
+  read_settings "$dir" "$kind"
+  take_project "$dir"
+  write_domains "$name" "$domains"
+  local mem; mem="$(clubctl_var "$dir" CLUBCTL_MEMORY_MB)"
+  [[ -z "$mem" ]] || { [[ "$mem" =~ ^[0-9]{2,5}$ ]] || die "CLUBCTL_MEMORY_MB must be a number of MB"; echo "$mem" > "$dir/.memory"; }
+  [[ "$kind" == app ]] && app_target "$dir"
+  [[ "$kind" == app ]] && take_app_links "$dir"
+  [[ "$kind" == app && -z "$(project_of "$name")" ]] && ensure_apps_net
+  rm -f "$dir/.clubctl.new"
+  write_app_env "$dir"
+  local state; state="$(cat "$dir/.state")"
+  if [[ "$state" == running ]]; then
+    log "Restarting $name with the new settings"
+    compose "$name" "$(cat "$dir/.image")" up -d --force-recreate --remove-orphans
+    if ! wait_healthy "$name"; then
+      echo "!! $name didn't start with the new settings, going back to the old ones" >&2
+      mv "$dir/settings.env.bak" "$dir/settings.env"; mv "$dir/domains.bak" "$dir/domains"
+      write_app_env "$dir"
+      compose "$name" "$(cat "$dir/.image")" up -d --force-recreate
+      wait_healthy "$name" || true
+      write_site "$name" running
+      exit 1
+    fi
+  fi
+  rm -f "$dir/settings.env.bak" "$dir/domains.bak"
+  write_site "$name" "$state"
+  log "Configured $name"
+}
+
+
+cmd_pause() {
+  local name="$1"; need_club "$name"; with_lock "$name"
+  local dir; dir="$(club_dir "$name")"
+  compose "$name" "$(cat "$dir/.image")" stop >/dev/null 2>&1 || true
+  echo paused > "$dir/.state"
+  has_site "$name" && write_site "$name" paused
+  log "Paused $name"
+}
+
+cmd_resume() {
+  local name="$1"; need_club "$name"; with_lock "$name"
+  local dir; dir="$(club_dir "$name")"
+  write_app_env "$dir"
+  is_app "$name" && [[ -z "$(project_of "$name")" ]] && ensure_apps_net
+  compose "$name" "$(cat "$dir/.image")" up -d --remove-orphans
+  wait_healthy "$name" || { docker logs --tail 60 "$(container "$name")" >&2 || true; die "$name didn't answer within 4 minutes"; }
+  echo running > "$dir/.state"
+  has_site "$name" && write_site "$name" running
+  log "Resumed $name"
+}
+
+cmd_backup() {
+  local name="$1"; need_club "$name"; need_data "$name"
+  mkdir -p "$ROOT/backups"
+  local file; file="$ROOT/backups/$(db_name "$name")-$(date -u +%Y%m%d-%H%M%S).sql.gz"
+  if is_pg "$name"; then file="${file%.sql.gz}.dump"; pg_dump_custom "$name" > "$file"
+  else dump_db "$name" "$file"; fi
+  log "Backed up $name to $file"
+}
+
+cmd_remove() {
+  local name="$1"; need_club "$name"; with_lock "$name"
+  local dir db keep; dir="$(club_dir "$name")"; db="$(db_name "$name")"
+  keep="$ROOT/removed/$name-$(date -u +%Y%m%d-%H%M%S)"
+  mkdir -p "$keep"
+  if is_pg "$name"; then
+    log "Taking a final copy into $keep"
+    if [[ "$(cat "$dir/.state")" == running ]]; then pg_dump_custom "$name" > "$keep/database.dump" || die "the final copy failed, so $name was NOT removed"; fi
+    compose "$name" "$(cat "$dir/.image")" down --remove-orphans >/dev/null 2>&1 || docker rm -f "$(container "$name")" >/dev/null 2>&1 || true
+    rm -rf "$dir"
+    cleanup_nets
+    log "Removed database $name (final copy kept in $keep)"
+    return
+  fi
+  if is_app "$name"; then
+    # An app keeps nothing here but its settings (its code is in GitHub).
+    cp "$dir/settings.env" "$dir/domains" "$dir/.image" "$keep/" 2>/dev/null || true
+    compose "$name" "$(cat "$dir/.image")" down --remove-orphans >/dev/null 2>&1 || docker rm -f "$(container "$name")" >/dev/null 2>&1 || true
+    rm -f "$ROOT/base/sites/$name.caddy"
+    [[ -n "$(ls -A "$ROOT/base/sites")" ]] || echo "# placeholder" > "$ROOT/base/sites/_empty.caddy"
+    caddy_reload
+    rm -rf "$dir"
+    cleanup_nets
+    log "Removed $name (its settings are kept in $keep)"
+    return
+  fi
+  log "Taking a final backup into $keep"
+  dump_db "$name" "$keep/database.sql.gz"
+  tar -C "$dir" -czf "$keep/files.tar.gz" data
+  cp "$dir/settings.env" "$dir/domains" "$keep/" 2>/dev/null || true
+  docker rm -f "$(container "$name")" >/dev/null 2>&1 || true
+  rm -f "$ROOT/base/sites/$name.caddy"
+  [[ -n "$(ls -A "$ROOT/base/sites")" ]] || echo "# placeholder" > "$ROOT/base/sites/_empty.caddy"
+  caddy_reload
+  psql -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)"
+  psql -c "DROP ROLE IF EXISTS \"$db\""
+  rm -rf "$dir"
+  cleanup_nets
+  log "Removed $name (final backup kept in $keep)"
+}
+
+# ── Off-site backups ──────────────────────────────────────────────────────────
+note() { echo "==> $*" >&2; } # progress for commands whose stdout is data
+
+safe_rel() { # a path under data/ that can't escape it
+  local p="$1"
+  [[ -n "$p" && "$p" != /* && "$p" != *$'\t'* && "$p" != *$'\r'* ]] || return 1
+  [[ "/$p/" != */../* && "/$p/" != */./* && "$p" != *//* ]] || return 1
+}
+
+cmd_info() {
+  local name="$1"; need_club "$name"; need_data "$name"
+  local dir image digest; dir="$(club_dir "$name")"; image="$(cat "$dir/.image")"
+  digest="$(docker image inspect -f '{{range .RepoDigests}}{{.}} {{end}}' "$image" 2>/dev/null | awk '{print $1}')"
+  digest="${digest##*@}"
+  printf '{"name":"%s","image":"%s","digest":"%s","state":"%s"}\n' "$name" "$image" "$digest" "$(cat "$dir/.state")"
+}
+
+
+pg_dump_custom() { # a database service's dump, custom format, to stdout
+  local dir; dir="$(club_dir "$1")"
+  docker exec "$(container "$1")" pg_dump -U "$(file_var "$dir/secrets.env" PGUSER)" -Fc -Z 6 --no-owner --no-acl "$(file_var "$dir/secrets.env" PGDATABASE)" </dev/null
+}
+
+cmd_dump() {
+  local name="$1"; need_club "$name"; need_data "$name"
+  if is_pg "$name"; then pg_dump_custom "$name"; return; fi
+  # Custom format: compressed, and pg_restore can load it as the club's own role.
+  docker exec "$PG" pg_dump -U postgres -Fc -Z 6 --no-owner --no-acl "$(db_name "$name")" </dev/null
+}
+
+# Files under data/ except Avrosphere's own export folder. Hashes are cached
+# by size + modification time, so an hourly run only hashes new files.
+cmd_files_index() {
+  local name="$1"; need_club "$name"; need_data "$name"
+  is_pg "$name" && return 0 # a database has no uploaded files
+  local dir cache list joined; dir="$(club_dir "$name")"; cache="$dir/.files-index"
+  list="$(mktemp)"; joined="$(mktemp)"
+  touch "$cache"
+  ( cd "$dir/data" && find . -path ./backups -prune -o -type f ! -name $'*\n*' ! -name $'*\t*' -printf '%P\t%s\t%T@\n' ) | sort > "$list"
+  awk -F'\t' 'FILENAME == ARGV[1] { c[$1 "\t" $2 "\t" $3] = $4; next } { k = $1 "\t" $2 "\t" $3; print k "\t" ((k in c) ? c[k] : "-") }' "$cache" "$list" > "$joined"
+  local p s m h
+  : > "$cache.new"
+  while IFS=$'\t' read -r p s m h; do
+    [[ -n "$p" ]] || continue
+    if [[ "$h" == - ]]; then h="$(sha256sum -- "$dir/data/$p" 2>/dev/null | cut -d' ' -f1)" || continue; [[ -n "$h" ]] || continue; fi
+    printf '%s\t%s\t%s\t%s\n' "$p" "$s" "$m" "$h" >> "$cache.new"
+  done < "$joined"
+  mv "$cache.new" "$cache"
+  rm -f "$list" "$joined"
+  awk -F'\t' '{ print $1 "\t" $2 "\t" $4 }' "$cache"
+}
+
+cmd_files_pack() {
+  local name="$1"; need_club "$name"; need_data "$name"
+  if is_pg "$name"; then printf 'E\n'; return; fi
+  local dir p size; dir="$(club_dir "$name")"
+  while IFS= read -r p || [[ -n "$p" ]]; do
+    safe_rel "$p" || die "bad path: ${p:0:80}"
+    [[ -f "$dir/data/$p" ]] || { note "gone since the index: $p"; continue; }
+    size="$(stat -c %s -- "$dir/data/$p")"
+    printf 'F %s %s\n' "$size" "$p"
+    head -c "$size" -- "$dir/data/$p"
+  done
+  printf 'E\n'
+}
+
+read_exact() { # read_exact SIZE FILE  (exactly SIZE bytes of stdin)
+  head -c "$1" > "$2"
+  [[ "$(stat -c %s "$2")" == "$1" ]] || die "the backup stream ended early"
+}
+
+cmd_restore_stage() {
+  local name="$1"; need_club "$name"; need_data "$name"
+  if is_pg "$name"; then pg_restore_stage "$name"; return; fi
+  with_lock "$name"
+  local dir stage db line rest size p sha src; dir="$(club_dir "$name")"; stage="$dir/.restore"; db="$(db_name "$name")"
+  rm -rf "$stage"; mkdir -p "$stage/data"
+  local -A have=()
+  if [[ -f "$dir/.files-index" ]]; then
+    while IFS=$'\t' read -r p _ _ sha; do [[ -n "$sha" && -z "${have[$sha]:-}" ]] && have[$sha]="$p"; done < "$dir/.files-index"
+  fi
+  local files=0 copied=0 got_db=0 ended=0
+  while IFS= read -r line; do
+    case "$line" in
+      "D "*) size="${line#D }"; [[ "$size" =~ ^[0-9]+$ ]] || die "bad frame"; read_exact "$size" "$stage/database.dump"; got_db=1 ;;
+      "S "*) size="${line#S }"; [[ "$size" =~ ^[0-9]+$ ]] || die "bad frame"; read_exact "$size" "$stage/secrets.env" ;;
+      "F "*) rest="${line#F }"; size="${rest%% *}"; p="${rest#* }"
+             [[ "$size" =~ ^[0-9]+$ ]] && safe_rel "$p" || die "bad frame: ${line:0:80}"
+             mkdir -p "$stage/data/$(dirname -- "$p")"; read_exact "$size" "$stage/data/$p"; files=$((files+1)) ;;
+      "C "*) rest="${line#C }"; sha="${rest%% *}"; p="${rest#* }"
+             [[ "$sha" =~ ^[a-f0-9]{64}$ ]] && safe_rel "$p" || die "bad frame: ${line:0:80}"
+             src="${have[$sha]:-}"; [[ -n "$src" && -f "$dir/data/$src" ]] || die "no local copy of $p"
+             mkdir -p "$stage/data/$(dirname -- "$p")"; cp --reflink=auto -- "$dir/data/$src" "$stage/data/$p"; copied=$((copied+1)) ;;
+      E) ended=1; break ;;
+      *) die "bad frame: ${line:0:80}" ;;
+    esac
+  done
+  (( ended && got_db )) || die "the backup stream ended early"
+  if [[ -f "$stage/secrets.env" ]]; then
+    grep -qvE '^(PAYLOAD_SECRET|MAIL_ENCRYPTION_KEY)=[A-Za-z0-9]+$' "$stage/secrets.env" && die "bad secrets in the backup"
+  fi
+  note "Staged $files downloaded and $copied local files"
+  note "Loading the database into a side copy (the site keeps running)"
+  psql -c "DROP DATABASE IF EXISTS \"${db}__restore\" WITH (FORCE)"
+  psql -c "CREATE DATABASE \"${db}__restore\" OWNER \"$db\""
+  psql -c "REVOKE ALL ON DATABASE \"${db}__restore\" FROM PUBLIC"
+  # --role: every object is created by (and so owned by) the club's own login.
+  docker exec -i "$PG" pg_restore -U postgres --role="$db" --no-owner --no-acl --exit-on-error -d "${db}__restore" < "$stage/database.dump" \
+    || { psql -c "DROP DATABASE IF EXISTS \"${db}__restore\" WITH (FORCE)" || true; die "the database copy didn't load"; }
+  rm -f "$stage/database.dump"
+  touch "$stage/.ready"
+  note "Staged the backup for $name"
+}
+
+cmd_restore_abort() {
+  local name="$1"; need_club "$name"; with_lock "$name"
+  local dir db; dir="$(club_dir "$name")"; db="$(db_name "$name")"
+  if is_pg "$name"; then pg_psql "$name" -c "DROP DATABASE IF EXISTS \"${db}__restore\" WITH (FORCE)" || true; rm -rf "$dir/.restore"; log "Threw away the staged backup of $name"; return; fi
+  psql -c "DROP DATABASE IF EXISTS \"${db}__restore\" WITH (FORCE)" || true
+  rm -rf "$dir/.restore"
+  log "Threw away the staged backup of $name"
+}
+
+swap_secret() { # swap_secret SECRETS_FILE NEW_LINES_FILE
+  local key line
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    grep -v "^$key=" "$1" > "$1.tmp" || true
+    echo "$line" >> "$1.tmp"; mv "$1.tmp" "$1"
+  done < "$2"
+}
+
+cmd_restore_apply() {
+  local name="$1" image="$2" mode="${3:-}"; need_club "$name"; need_data "$name"; valid_image "$image" || die "bad image: $image"
+  if is_pg "$name"; then pg_restore_apply "$name"; return; fi
+  [[ -z "$mode" || "$mode" == copy ]] || die "bad mode: $mode"
+  with_lock "$name"
+  local dir stage db state previous stamp; dir="$(club_dir "$name")"; stage="$dir/.restore"; db="$(db_name "$name")"
+  [[ -f "$stage/.ready" ]] || die "nothing is staged for $name"
+  state="$(cat "$dir/.state")"; previous="$(cat "$dir/.image")"
+  if ! docker image inspect "$image" >/dev/null 2>&1 && ! docker pull -q "$image" >/dev/null 2>&1; then
+    echo "clubctl: image missing: $image" >&2; exit 3
+  fi
+  log "Stopping $name"
+  compose "$name" "$previous" stop >/dev/null 2>&1 || true
+  write_site "$name" paused
+  log "Swapping in the backup"
+  psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('$db', '${db}__restore') AND pid <> pg_backend_pid()" >/dev/null
+  psql -c "DROP DATABASE IF EXISTS \"${db}__old\" WITH (FORCE)"
+  psql -c "ALTER DATABASE \"$db\" RENAME TO \"${db}__old\""
+  psql -c "ALTER DATABASE \"${db}__restore\" RENAME TO \"$db\""
+  if [[ "$mode" == copy ]]; then
+    need_kind avrosphere
+    avrosphere_pause_jobs "$db"
+  fi
+  rm -rf "$dir/.old-data"
+  mv "$dir/data" "$dir/.old-data"
+  mv "$stage/data" "$dir/data"
+  [[ -d "$dir/.old-data/backups" ]] && mv "$dir/.old-data/backups" "$dir/data/backups"
+  cp "$dir/secrets.env" "$dir/.old-secrets.env"
+  [[ -f "$stage/secrets.env" ]] && swap_secret "$dir/secrets.env" "$stage/secrets.env"
+  echo "$image" > "$dir/.image"
+  rm -f "$dir/.files-index"
+  if [[ "$state" == running ]]; then
+    log "Starting $name on $image"
+    write_app_env "$dir"
+    compose "$name" "$image" up -d --force-recreate --remove-orphans
+    if ! wait_healthy "$name"; then
+      echo "!! The restored site didn't answer within 4 minutes. Last logs:" >&2
+      docker logs --tail 60 "$(container "$name")" >&2 || true
+      echo "!! Putting the site back as it was before the restore" >&2
+      compose "$name" "$image" stop >/dev/null 2>&1 || true
+      psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db' AND pid <> pg_backend_pid()" >/dev/null
+      psql -c "DROP DATABASE \"$db\" WITH (FORCE)"
+      psql -c "ALTER DATABASE \"${db}__old\" RENAME TO \"$db\""
+      [[ -d "$dir/data/backups" ]] && mv "$dir/data/backups" "$dir/.old-data/backups"
+      rm -rf "$dir/data"; mv "$dir/.old-data" "$dir/data"
+      mv "$dir/.old-secrets.env" "$dir/secrets.env"
+      echo "$previous" > "$dir/.image"
+      write_app_env "$dir"
+      compose "$name" "$previous" up -d --force-recreate
+      wait_healthy "$name" && echo "!! The site is running as before" >&2 || echo "!! The site isn't answering on its previous version either" >&2
+      write_site "$name" running
+      rm -rf "$stage"
+      exit 1
+    fi
+    write_site "$name" running
+  else
+    write_app_env "$dir"
+  fi
+  psql -c "DROP DATABASE IF EXISTS \"${db}__old\" WITH (FORCE)"
+  rm -rf "$dir/.old-data" "$dir/.old-secrets.env" "$stage"
+  log "Restored $name (now on $image, $state)"
+}
+
+cmd_image_save() {
+  local image="$1"; valid_image "$image" || die "bad image: $image"
+  docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image" >/dev/null 2>&1 || die "no such image here: $image"
+  docker save "$image" | gzip -1
+}
+
+cmd_image_load() {
+  gunzip | docker load >&2
+  log "Loaded the image"
+}
+
+# ── Apps ──────────────────────────────────────────────────────────────────────
+app_target() { # app_target DIR: CLUBCTL_PORT / CLUBCTL_HEALTH_PATH from the last read_settings
+  local dir="$1" port health
+  port="$(clubctl_var "$dir" CLUBCTL_PORT)"; health="$(clubctl_var "$dir" CLUBCTL_HEALTH_PATH)"
+  [[ -n "$port" ]] && { valid_port "$port" || die "CLUBCTL_PORT must be a port number"; echo "$port" > "$dir/.port"; }
+  [[ -n "$health" ]] && { valid_health "$health" || die "CLUBCTL_HEALTH_PATH must be a path like /health"; echo "$health" > "$dir/.health"; }
+  [[ -f "$dir/.port" ]] || echo 3000 > "$dir/.port"
+  [[ -f "$dir/.health" ]] || echo / > "$dir/.health"
+}
+
+cmd_app_create() {
+  local name="$1" image="$2" domains="$3"
+  need_name "$name"; valid_image "$image" || die "bad image: $image"
+  local dir; dir="$(club_dir "$name")"
+  [[ ! -e "$dir" ]] || die "site already exists: $name"
+  with_lock "$name"
+  mkdir -p "$dir"
+  CREATING="$name"; trap cleanup_failed_create EXIT
+  echo app > "$dir/.kind"
+  read_settings "$dir" app
+  take_project "$dir"
+  take_app_links "$dir"
+  write_domains "$name" "$domains"
+  local mem; mem="$(clubctl_var "$dir" CLUBCTL_MEMORY_MB)"
+  [[ "${mem:-256}" =~ ^[0-9]{2,5}$ ]] || die "CLUBCTL_MEMORY_MB must be a number of MB"
+  echo "${mem:-256}" > "$dir/.memory"
+  app_target "$dir"
+  local ruser rtoken; ruser="$(clubctl_var "$dir" CLUBCTL_REGISTRY_USER)"; rtoken="$(clubctl_var "$dir" CLUBCTL_REGISTRY_TOKEN)"
+  rm -f "$dir/.clubctl.new"
+  write_app_env "$dir"
+  [[ -n "$(project_of "$name")" ]] || ensure_apps_net
+  image="$(pull_app_image "$image" "$ruser" "$rtoken")" || exit 1
+  run_predeploy "$name" "$image" || die "the pre-deploy command failed, so $name wasn't started"
+  log "Starting $name"
+  compose "$name" "$image" up -d --remove-orphans
+  if ! wait_healthy "$name"; then
+    docker logs --tail 60 "$(container "$name")" >&2 || true
+    if [[ "$(cat "$dir/.health")" == - ]]; then die "the app didn't keep running (it stopped or kept restarting; its last log lines are above)"; fi
+    die "the app didn't answer on port $(cat "$dir/.port") at $(cat "$dir/.health") within 2 minutes"
+  fi
+  echo "$image" > "$dir/.image"; echo running > "$dir/.state"
+  write_site "$name" running
+  trap - EXIT
+  if [[ -s "$dir/domains" ]]; then log "Created $name at https://$(head -1 "$dir/domains")"; else log "Created $name (no web address; reachable inside its project as $name:$(cat "$dir/.port"))"; fi
+}
+
+cmd_app_deploy() {
+  local name="$1" image="$2"; need_club "$name"; valid_image "$image" || die "bad image: $image"
+  is_app "$name" || die "$name isn't an app"
+  with_lock "$name"
+  local dir previous state ruser="" rtoken=""; dir="$(club_dir "$name")"
+  previous="$(cat "$dir/.image")"; state="$(cat "$dir/.state")"
+  # Newer deployers send the app's settings along (database links, pre-deploy command).
+  local incoming; incoming="$(mktemp)"; [[ -t 0 ]] || cat > "$incoming"
+  if [[ -s "$incoming" ]]; then
+    cp "$dir/settings.env" "$dir/settings.env.bak"
+    local f; for f in .links .predeploy; do rm -f "$dir/$f.bak"; [[ -f "$dir/$f" ]] && cp "$dir/$f" "$dir/$f.bak"; done
+    touch "$dir/.deploy-undo"
+    read_settings "$dir" app < "$incoming"
+    take_project "$dir"; take_app_links "$dir"; app_target "$dir"
+    ruser="$(clubctl_var "$dir" CLUBCTL_REGISTRY_USER)"; rtoken="$(clubctl_var "$dir" CLUBCTL_REGISTRY_TOKEN)"
+    rm -f "$dir/.clubctl.new"
+  fi
+  rm -f "$incoming"
+  image="$(pull_app_image "$image" "$ruser" "$rtoken")" || exit 1
+  if [[ "$state" != running ]]; then
+    echo "$image" > "$dir/.image"
+    log "Deployed $image to $name (it stays $state)"
+    return
+  fi
+  write_app_env "$dir"
+  [[ -n "$(project_of "$name")" ]] || ensure_apps_net
+  if ! run_predeploy "$name" "$image"; then
+    # Put the settings that came with this version back as they were.
+    if [[ -f "$dir/.deploy-undo" ]]; then
+      local f; for f in .links .predeploy; do rm -f "$dir/$f"; [[ -f "$dir/$f.bak" ]] && mv "$dir/$f.bak" "$dir/$f"; done
+      [[ -f "$dir/settings.env.bak" ]] && mv "$dir/settings.env.bak" "$dir/settings.env"
+      rm -f "$dir/.deploy-undo"
+      write_app_env "$dir"
+    fi
+    echo "!! $previous keeps running" >&2
+    exit 1
+  fi
+  rm -f "$dir/settings.env.bak" "$dir/.links.bak" "$dir/.predeploy.bak" "$dir/.deploy-undo"
+  log "Starting the new version"
+  compose "$name" "$image" up -d --remove-orphans
+  if ! wait_healthy "$name"; then
+    if [[ "$(cat "$dir/.health")" == - ]]; then echo "!! The new version didn't keep running. Last logs:" >&2
+    else echo "!! The new version didn't answer at $(cat "$dir/.health") on port $(cat "$dir/.port") within 2 minutes. Last logs:" >&2; fi
+    docker logs --tail 80 "$(container "$name")" >&2 || true
+    echo "!! Going back to $previous" >&2
+    compose "$name" "$previous" up -d
+    wait_healthy "$name" && echo "!! The previous version is running again" >&2 || echo "!! The previous version isn't answering either" >&2
+    exit 1
+  fi
+  echo "$image" > "$dir/.image"
+  log "Deployed $image to $name"
+}
+
+# ── PostgreSQL services ───────────────────────────────────────────────────────
+pg_psql() { # pg_psql NAME args...: psql as the database's own (superuser) login, in its container
+  local dir; dir="$(club_dir "$1")"; local c; c="$(container "$1")"; shift
+  docker exec -e PGOPTIONS='-c client_min_messages=warning' "$c" psql -U "$(file_var "$dir/secrets.env" PGUSER)" -d postgres -v ON_ERROR_STOP=1 -qtA "$@" </dev/null
+}
+
+cmd_db_create() {
+  local name="$1" image="$2"
+  need_name "$name"; valid_pg_image "$image" || die "pick a PostgreSQL version (postgres:16 or postgres:17), not $image"
+  local dir user; dir="$(club_dir "$name")"; user="$(db_name "$name")"
+  [[ ! -e "$dir" ]] || die "site already exists: $name"
+  with_lock "$name"
+  mkdir -p "$dir/pgdata"
+  CREATING="$name"; trap cleanup_failed_create EXIT
+  echo postgres > "$dir/.kind"
+  read_settings "$dir" app
+  take_project "$dir"
+  [[ -n "$(project_of "$name")" ]] || die "a database needs a project (CLUBCTL_PROJECT)"
+  local mem; mem="$(clubctl_var "$dir" CLUBCTL_MEMORY_MB)"
+  [[ "${mem:-256}" =~ ^[0-9]{3,5}$ ]] || die "CLUBCTL_MEMORY_MB must be a number of MB"
+  echo "${mem:-256}" > "$dir/.memory"
+  rm -f "$dir/.clubctl.new" "$dir/settings.env"
+  { echo "PGUSER=$user"; echo "PGPASSWORD=$(openssl rand -hex 24)"; echo "PGDATABASE=$user"; } > "$dir/secrets.env"
+  write_app_env "$dir"
+  pull_image "$image"
+  log "Starting PostgreSQL $name on network $(project_net "$name")"
+  compose "$name" "$image" up -d --remove-orphans
+  wait_healthy "$name" || { docker logs --tail 60 "$(container "$name")" >&2 || true; die "the database didn't start within 2 minutes"; }
+  echo "$image" > "$dir/.image"; echo running > "$dir/.state"
+  trap - EXIT
+  log "Created database $name (apps in project $(project_of "$name") reach it at $name:5432)"
+}
+
+pg_configure() { # memory or project changed: recreate the container (the data stays)
+  local name="$1" dir; dir="$(club_dir "$name")"
+  with_lock "$name"
+  read_settings "$dir" app
+  take_project "$dir"
+  local mem; mem="$(clubctl_var "$dir" CLUBCTL_MEMORY_MB)"
+  [[ -z "$mem" ]] || { [[ "$mem" =~ ^[0-9]{3,5}$ ]] || die "CLUBCTL_MEMORY_MB must be a number of MB"; echo "$mem" > "$dir/.memory"; }
+  rm -f "$dir/.clubctl.new" "$dir/settings.env"
+  write_app_env "$dir"
+  if [[ "$(cat "$dir/.state")" == running ]]; then
+    log "Restarting $name with the new settings"
+    compose "$name" "$(cat "$dir/.image")" up -d --force-recreate --remove-orphans
+    wait_healthy "$name" || { docker logs --tail 60 "$(container "$name")" >&2 || true; die "$name didn't start again"; }
+  fi
+  log "Configured $name"
+}
+
+cmd_db_stats() {
+  local name="$1"; need_club "$name"; need_pg "$name"
+  local dir db running=false bytes=0 conns=0 max=0 ro=false; dir="$(club_dir "$name")"; db="$(file_var "$dir/secrets.env" PGDATABASE)"
+  [[ -f "$dir/.readonly" ]] && ro=true
+  if healthy "$name"; then
+    running=true
+    bytes="$(pg_psql "$name" -c "SELECT pg_database_size('$db')" 2>/dev/null || echo 0)"
+    conns="$(pg_psql "$name" -c "SELECT count(*) FROM pg_stat_activity WHERE datname = '$db'" 2>/dev/null || echo 0)"
+    max="$(pg_psql "$name" -c "SHOW max_connections" 2>/dev/null || echo 0)"
+  fi
+  printf '{"running":%s,"bytes":%s,"connections":%s,"maxConnections":%s,"readOnly":%s}\n' "$running" "${bytes:-0}" "${conns:-0}" "${max:-0}" "$ro"
+}
+
+cmd_db_credentials() {
+  local name="$1"; need_club "$name"; need_pg "$name"
+  db_vars "$name" ""
+}
+
+cmd_db_rotate() {
+  local name="$1"; need_club "$name"; need_pg "$name"; with_lock "$name"
+  local dir user pass; dir="$(club_dir "$name")"; user="$(file_var "$dir/secrets.env" PGUSER)"; pass="$(openssl rand -hex 24)"
+  healthy "$name" || die "$name isn't running, so its password can't be changed now"
+  pg_psql "$name" -c "ALTER ROLE \"$user\" PASSWORD '$pass'" >/dev/null
+  sed -i "s/^PGPASSWORD=.*/PGPASSWORD=$pass/" "$dir/secrets.env"
+  write_app_env "$dir"
+  log "New password for $name (restart the apps that use it)"
+}
+
+cmd_db_readonly() {
+  local name="$1" mode="$2"; need_club "$name"; need_pg "$name"; with_lock "$name"
+  [[ "$mode" == on || "$mode" == off ]] || die "usage: clubctl db-readonly NAME on|off"
+  local dir db; dir="$(club_dir "$name")"; db="$(file_var "$dir/secrets.env" PGDATABASE)"
+  pg_psql "$name" -c "ALTER DATABASE \"$db\" SET default_transaction_read_only = $mode" >/dev/null
+  # Open sessions keep the old setting: end them so apps reconnect with the new one.
+  pg_psql "$name" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db' AND pid <> pg_backend_pid()" >/dev/null || true
+  if [[ "$mode" == on ]]; then touch "$dir/.readonly"; log "$name is read-only until its quota is raised or data is deleted"
+  else rm -f "$dir/.readonly"; log "$name takes writes again"; fi
+}
+
+pg_restore_stage() { # a backup's dump → a side database next to the live one
+  local name="$1"; with_lock "$name"
+  local dir stage db line size; dir="$(club_dir "$name")"; stage="$dir/.restore"; db="$(file_var "$dir/secrets.env" PGDATABASE)"
+  rm -rf "$stage"; mkdir -p "$stage"
+  local got_db=0 ended=0
+  while IFS= read -r line; do
+    case "$line" in
+      "D "*) size="${line#D }"; [[ "$size" =~ ^[0-9]+$ ]] || die "bad frame"; read_exact "$size" "$stage/database.dump"; got_db=1 ;;
+      "S "*) size="${line#S }"; [[ "$size" =~ ^[0-9]+$ ]] || die "bad frame"; read_exact "$size" "$stage/ignored" ;;
+      E) ended=1; break ;;
+      *) die "a database backup holds only its dump, not: ${line:0:40}" ;;
+    esac
+  done
+  (( ended && got_db )) || die "the backup stream ended early"
+  healthy "$name" || die "$name isn't running, so the backup can't be loaded"
+  note "Loading the backup into a side copy (the database keeps running)"
+  pg_psql "$name" -c "DROP DATABASE IF EXISTS \"${db}__restore\" WITH (FORCE)" >/dev/null
+  pg_psql "$name" -c "CREATE DATABASE \"${db}__restore\"" >/dev/null
+  docker exec -i "$(container "$name")" pg_restore -U "$(file_var "$dir/secrets.env" PGUSER)" --no-owner --no-acl --exit-on-error -d "${db}__restore" < "$stage/database.dump" \
+    || { pg_psql "$name" -c "DROP DATABASE IF EXISTS \"${db}__restore\" WITH (FORCE)" >/dev/null || true; die "the backup didn't load"; }
+  rm -f "$stage/database.dump" "$stage/ignored"
+  touch "$stage/.ready"
+  note "Staged the backup for $name"
+}
+
+pg_restore_apply() { # swap the side database in; the old one is kept until the swap is done
+  local name="$1"; with_lock "$name"
+  local dir stage db; dir="$(club_dir "$name")"; stage="$dir/.restore"; db="$(file_var "$dir/secrets.env" PGDATABASE)"
+  [[ -f "$stage/.ready" ]] || die "nothing is staged for $name"
+  log "Swapping in the backup"
+  pg_psql "$name" -c "ALTER DATABASE \"$db\" ALLOW_CONNECTIONS false" >/dev/null
+  pg_psql "$name" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('$db', '${db}__restore') AND pid <> pg_backend_pid()" >/dev/null
+  pg_psql "$name" -c "DROP DATABASE IF EXISTS \"${db}__old\" WITH (FORCE)" >/dev/null
+  if ! pg_psql "$name" -c "ALTER DATABASE \"$db\" RENAME TO \"${db}__old\"" >/dev/null; then
+    pg_psql "$name" -c "ALTER DATABASE \"$db\" ALLOW_CONNECTIONS true" >/dev/null || true
+    die "couldn't set the current data aside; nothing was changed"
+  fi
+  if ! pg_psql "$name" -c "ALTER DATABASE \"${db}__restore\" RENAME TO \"$db\"" >/dev/null; then
+    pg_psql "$name" -c "ALTER DATABASE \"${db}__old\" RENAME TO \"$db\"" >/dev/null || true
+    pg_psql "$name" -c "ALTER DATABASE \"$db\" ALLOW_CONNECTIONS true" >/dev/null || true
+    die "couldn't swap the backup in; the database was put back as it was"
+  fi
+  pg_psql "$name" -c "ALTER DATABASE \"$db\" ALLOW_CONNECTIONS true" >/dev/null
+  [[ -f "$dir/.readonly" ]] && pg_psql "$name" -c "ALTER DATABASE \"$db\" SET default_transaction_read_only = on" >/dev/null
+  pg_psql "$name" -c "DROP DATABASE IF EXISTS \"${db}__old\" WITH (FORCE)" >/dev/null
+  rm -rf "$stage"
+  log "Restored $name"
+}
+
+cmd_db_upgrade() {
+  local name="$1" image="$2"; need_club "$name"; need_pg "$name"
+  valid_pg_image "$image" || die "pick a PostgreSQL version (postgres:16 or postgres:17), not $image"
+  with_lock "$name"
+  local dir previous user db; dir="$(club_dir "$name")"; previous="$(cat "$dir/.image")"
+  user="$(file_var "$dir/secrets.env" PGUSER)"; db="$(file_var "$dir/secrets.env" PGDATABASE)"
+  [[ "$image" != "$previous" ]] || { log "$name already runs $image"; return; }
+  [[ "$(cat "$dir/.state")" == running ]] || die "resume $name first: its data is copied while it runs"
+  pull_image "$image"
+  log "Copying $name"
+  pg_dump_custom "$name" > "$dir/upgrade.dump" || die "the copy failed; nothing was changed"
+  compose "$name" "$previous" stop >/dev/null 2>&1 || true
+  rm -rf "$dir/pgdata.previous"; mv "$dir/pgdata" "$dir/pgdata.previous"; mkdir -p "$dir/pgdata"
+  echo "$image" > "$dir/.image"
+  undo() {
+    echo "!! Going back to $previous" >&2
+    compose "$name" "$image" down >/dev/null 2>&1 || docker rm -f "$(container "$name")" >/dev/null 2>&1 || true
+    rm -rf "$dir/pgdata"; mv "$dir/pgdata.previous" "$dir/pgdata"; echo "$previous" > "$dir/.image"
+    compose "$name" "$previous" up -d --remove-orphans
+    wait_healthy "$name" && echo "!! $name runs $previous again" >&2 || echo "!! $name isn't answering on $previous either" >&2
+    rm -f "$dir/upgrade.dump"
+    exit 1
+  }
+  log "Starting $image"
+  compose "$name" "$image" up -d --remove-orphans || undo
+  wait_healthy "$name" || undo
+  log "Loading the copy"
+  docker exec -i "$(container "$name")" pg_restore -U "$user" --no-owner --no-acl --exit-on-error -d "$db" < "$dir/upgrade.dump" || undo
+  [[ -f "$dir/.readonly" ]] && pg_psql "$name" -c "ALTER DATABASE \"$db\" SET default_transaction_read_only = on" >/dev/null
+  rm -rf "$dir/pgdata.previous" "$dir/upgrade.dump"
+  log "$name now runs $image"
+}
+
+cmd_project_set() {
+  local name="$1" project="$2"; need_club "$name"; valid_name "$project" || die "bad project name: $project"
+  with_lock "$name"
+  local dir; dir="$(club_dir "$name")"
+  [[ "$(cat "$dir/.project" 2>/dev/null)" == "$project" ]] && on_net "$(container "$name")" "proj-$project" && { log "$name is already on network proj-$project"; return; }
+  echo "$project" > "$dir/.project"
+  if is_app "$name" || is_pg "$name"; then
+    # Their project network is their main one, so the container is made again (a few seconds).
+    write_app_env "$dir"
+    if [[ "$(cat "$dir/.state" 2>/dev/null)" == running ]]; then
+      log "Restarting $name on network proj-$project"
+      compose "$name" "$(cat "$dir/.image")" up -d --remove-orphans
+      wait_healthy "$name" || { docker logs --tail 60 "$(container "$name")" >&2 || true; die "$name didn't answer after moving"; }
+    else
+      compose "$name" "$(cat "$dir/.image")" up --no-start --remove-orphans >/dev/null 2>&1 || true
+    fi
+  else
+    attach_project "$name" # Avrosphere sites only gain a network, no restart
+  fi
+  cleanup_nets
+  log "$name is on network proj-$project"
+}
+
+cmd_logs() {
+  local name="$1" lines="${2:-200}"; need_club "$name"
+  [[ "$lines" =~ ^[0-9]{1,4}$ ]] || die "bad line count"
+  docker logs --tail "$lines" "$(container "$name")" 2>&1
+}
+
+# Live logs for the deployer's Logs card. The deployer closes the SSH channel
+# when the viewer leaves; the timeout is the backstop so nothing runs forever.
+cmd_logs_follow() {
+  local name="$1" lines="${2:-100}"; need_club "$name"
+  [[ "$lines" =~ ^[0-9]{1,4}$ ]] || die "bad line count"
+  exec timeout --foreground 1800 docker logs --tail "$lines" --follow "$(container "$name")" 2>&1
+}
+
+case "${1:-}" in
+  host)      cmd_host ;;
+  status)    cmd_status ;;
+  create)    [[ $# -eq 4 ]] || die "usage: clubctl create NAME IMAGE DOMAINS"; cmd_create "$2" "$3" "$4" ;;
+  configure) [[ $# -eq 3 ]] || die "usage: clubctl configure NAME DOMAINS"; cmd_configure "$2" "$3" ;;
+  upgrade)   [[ $# -eq 3 ]] || die "usage: clubctl upgrade NAME IMAGE"; cmd_upgrade "$2" "$3" ;;
+  pause)     [[ $# -eq 2 ]] || die "usage: clubctl pause NAME"; cmd_pause "$2" ;;
+  resume)    [[ $# -eq 2 ]] || die "usage: clubctl resume NAME"; cmd_resume "$2" ;;
+  backup)    [[ $# -eq 2 ]] || die "usage: clubctl backup NAME"; cmd_backup "$2" ;;
+  remove)    [[ $# -eq 2 ]] || die "usage: clubctl remove NAME"; cmd_remove "$2" ;;
+  info)      [[ $# -eq 2 ]] || die "usage: clubctl info NAME"; cmd_info "$2" ;;
+  secrets)   [[ $# -eq 2 ]] || die "usage: clubctl secrets NAME"; cmd_secrets "$2" ;;
+  dump)      [[ $# -eq 2 ]] || die "usage: clubctl dump NAME"; cmd_dump "$2" ;;
+  files-index) [[ $# -eq 2 ]] || die "usage: clubctl files-index NAME"; cmd_files_index "$2" ;;
+  files-pack)  [[ $# -eq 2 ]] || die "usage: clubctl files-pack NAME"; cmd_files_pack "$2" ;;
+  restore-stage) [[ $# -eq 2 ]] || die "usage: clubctl restore-stage NAME"; cmd_restore_stage "$2" ;;
+  restore-apply) [[ $# -ge 3 && $# -le 4 ]] || die "usage: clubctl restore-apply NAME IMAGE [copy]"; cmd_restore_apply "$2" "$3" "${4:-}" ;;
+  restore-abort) [[ $# -eq 2 ]] || die "usage: clubctl restore-abort NAME"; cmd_restore_abort "$2" ;;
+  image-save) [[ $# -eq 2 ]] || die "usage: clubctl image-save IMAGE"; cmd_image_save "$2" ;;
+  image-load) [[ $# -eq 1 ]] || die "usage: clubctl image-load"; cmd_image_load ;;
+  app-create) [[ $# -eq 4 ]] || die "usage: clubctl app-create NAME IMAGE DOMAINS"; cmd_app_create "$2" "$3" "$4" ;;
+  app-deploy) [[ $# -eq 3 ]] || die "usage: clubctl app-deploy NAME IMAGE"; cmd_app_deploy "$2" "$3" ;;
+  https)     [[ $# -eq 2 ]] || die "usage: clubctl https NAME"; cmd_https "$2" ;;
+  project-set) [[ $# -eq 3 ]] || die "usage: clubctl project-set NAME PROJECT"; cmd_project_set "$2" "$3" ;;
+  db-create) [[ $# -eq 3 ]] || die "usage: clubctl db-create NAME IMAGE"; cmd_db_create "$2" "$3" ;;
+  db-stats)  [[ $# -eq 2 ]] || die "usage: clubctl db-stats NAME"; cmd_db_stats "$2" ;;
+  db-credentials) [[ $# -eq 2 ]] || die "usage: clubctl db-credentials NAME"; cmd_db_credentials "$2" ;;
+  db-rotate) [[ $# -eq 2 ]] || die "usage: clubctl db-rotate NAME"; cmd_db_rotate "$2" ;;
+  db-readonly) [[ $# -eq 3 ]] || die "usage: clubctl db-readonly NAME on|off"; cmd_db_readonly "$2" "$3" ;;
+  db-upgrade) [[ $# -eq 3 ]] || die "usage: clubctl db-upgrade NAME IMAGE"; cmd_db_upgrade "$2" "$3" ;;
+  logs)      [[ $# -ge 2 && $# -le 3 ]] || die "usage: clubctl logs NAME [LINES]"; cmd_logs "$2" "${3:-200}" ;;
+  logs-follow) [[ $# -ge 2 && $# -le 3 ]] || die "usage: clubctl logs-follow NAME [LINES]"; cmd_logs_follow "$2" "${3:-100}" ;;
+  *)         die "unknown command: ${1:-} (see the header of this file)" ;;
+esac

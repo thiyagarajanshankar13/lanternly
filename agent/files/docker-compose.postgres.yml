@@ -1,0 +1,49 @@
+# One PostgreSQL database service, run by clubctl as compose project
+# <namespace>-<name> from its folder (pg.env and pgdata/ live there).
+#
+# Each database has its own container and data folder, so one project's
+# database can't slow down or read another's. It is only on its project's
+# network (proj-<project>): apps there reach it as <name>:5432. No port is
+# published, so nothing outside the server can connect.
+services:
+  app:
+    image: ${IMAGE:?}
+    container_name: ${NAMESPACE:-avrosphere}-${APP_NAME:?}
+    restart: unless-stopped
+    labels:
+      - "${NAMESPACE:-avrosphere}.club=${APP_NAME}"
+      - "${NAMESPACE:-avrosphere}.kind=postgres"
+    env_file:
+      - path: ./pg.env
+        format: raw
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-64}MB
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-40}
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    shm_size: 128m
+    mem_limit: ${MEMORY_MB:-256}m
+    memswap_limit: ${MEMORY_MB:-256}m
+    cpus: 1
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      project:
+        aliases: ["${APP_NAME}"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  project:
+    name: ${PROJECT_NET:?a database needs a project}
+    external: true

@@ -1,0 +1,6 @@
+# One file per club in sites/, written by clubctl:
+#   club.avro.site, www.their-domain.com { reverse_proxy <namespace>-<name>:3000 }
+# Caddy gets and renews the HTTPS certificates itself. global.caddy is written
+# by setup-clubs-vm.sh (the email address certificate authorities may contact).
+import /etc/caddy/global.caddy
+import /etc/caddy/sites/*.caddy

@@ -1,0 +1,37 @@
+# One app (a container built from a GitHub repo), run by clubctl as compose
+# project <namespace>-<name> from the app's folder (app.env lives there).
+#
+# Apps run whatever code is in their branch, so they get their own network:
+# their project's (proj-<project>, PROJECT_NET), or APPS_NET (avro-apps) for apps made
+# before projects. Caddy is on it, the shared Postgres is not; other services
+# of the same project reach the app by its name. They
+# keep no files here (no volume) and can't gain new privileges.
+services:
+  app:
+    image: ${IMAGE:?}
+    container_name: ${NAMESPACE:-avrosphere}-${APP_NAME:?}
+    restart: unless-stopped
+    labels:
+      - "${NAMESPACE:-avrosphere}.club=${APP_NAME}"
+      - "${NAMESPACE:-avrosphere}.kind=app"
+    # raw: values are used exactly as written (no quotes or $ expansion).
+    env_file:
+      - path: ./app.env
+        format: raw
+    mem_limit: ${MEMORY_MB:-256}m
+    memswap_limit: ${MEMORY_MB:-256}m
+    cpus: 1
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      project:
+        aliases: ["${APP_NAME}"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  project:
+    name: ${PROJECT_NET:-${APPS_NET:-avro-apps}}
+    external: true

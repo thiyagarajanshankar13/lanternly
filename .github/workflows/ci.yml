@@ -1,0 +1,17 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: bash -n agent/clubctl agent/clubctl-ssh agent/setup-clubs-vm.sh agent/kinds/*.sh deploy/setup-deployer-vm.sh
+      - run: npm run build

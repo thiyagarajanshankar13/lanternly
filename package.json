@@ -1,0 +1,50 @@
+{
+  "name": "lanternly",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted deployer: apps from GitHub or Docker images and PostgreSQL databases on your own servers over SSH, with HTTPS, backups and monitoring.",
+  "scripts": {
+    "dev": "next dev --port 3100",
+    "build": "next build",
+    "start": "next start --port ${PORT:-3100}",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-budgets": "^3.1176.0",
+    "@aws-sdk/client-cost-explorer": "^3.1176.0",
+    "@aws-sdk/client-freetier": "^3.1176.0",
+    "@aws-sdk/client-lightsail": "^3.1176.0",
+    "@aws-sdk/client-s3": "^3.1175.0",
+    "@aws-sdk/client-sts": "^3.1176.0",
+    "@aws-sdk/lib-storage": "^3.1175.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "better-sqlite3": "^11.8.1",
+    "blakejs": "^1.2.1",
+    "next": "15.2.9",
+    "nodemailer": "^6.10.1",
+    "qrcode": "^1.5.4",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "ssh2": "^1.16.0",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/libsodium-wrappers": "^0.7.14",
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "19.0.10",
+    "@types/react-dom": "19.0.4",
+    "@types/ssh2": "^1.15.4",
+    "libsodium-wrappers": "^0.7.15",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "license": "AGPL-3.0-only"
+}

@@ -1,0 +1,131 @@
+# First-time setup of the two VMs, so nobody has to copy files and run the
+# setup scripts by hand. Run it from Actions > "Set up a VM" > Run workflow.
+# Safe to run again: it also updates clubctl on the sites VM after a change
+# to agent/.
+#
+# Before running, create the VM (Ubuntu 24.04, static IP, ports 22, 80 and
+# 443 open) and add these under Settings > Secrets and variables > Actions.
+#
+# Deployer VM
+#   secret   DEPLOYER_VM_SSH_KEY     private key that can SSH to the VM (the Lightsail key)
+#   secret   DEPLOYER_SETUP_TOKEN    a code you make up (16+ letters/digits); typed once at /admin/setup
+#   variable DEPLOYER_VM_HOST        the VM's address
+#   variable DEPLOYER_VM_USER        SSH user (default: ubuntu)
+#   variable DEPLOYER_DOMAIN         e.g. admin.avro.site
+#   variable PUBLIC_DOMAIN           optional: the public site's domain (default: DEPLOYER_DOMAIN without its first label, e.g. avro.site; "none" for no public site)
+#
+# Sites VM (where the business sites run)
+#   secret   SITES_VM_SSH_KEY        private key that can SSH to the VM (may be the same key)
+#   secret   GHCR_READ_TOKEN         token that can read packages, so the VM can pull the Avrosphere image
+#   variable SITES_VM_HOST           the VM's address
+#   variable SITES_VM_USER           SSH user (default: ubuntu)
+#   variable GHCR_USER               the GitHub user the token belongs to
+#   variable ACME_EMAIL              email for HTTPS certificate notices
+#
+# Optional, checked when set: variables DEPLOYER_VM_HOST_KEY and
+# SITES_VM_HOST_KEY ("ssh-ed25519 AAAA…"). On a first run they are not known
+# yet, so the key the VM presents is accepted and shown in the run summary.
+name: Set up a VM
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which VM to set up
+        type: choice
+        options: [both, deployer, sites]
+        default: both
+permissions:
+  contents: read
+concurrency:
+  group: setup-vm
+jobs:
+  deployer:
+    name: Deployer VM
+    if: inputs.target != 'sites'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up the deployer VM
+        env:
+          SSH_KEY: ${{ secrets.DEPLOYER_VM_SSH_KEY }}
+          HOST: ${{ vars.DEPLOYER_VM_HOST }}
+          VM_USER: ${{ vars.DEPLOYER_VM_USER || 'ubuntu' }}
+          HOST_KEY: ${{ vars.DEPLOYER_VM_HOST_KEY }}
+          DEPLOYER_DOMAIN: ${{ vars.DEPLOYER_DOMAIN }}
+          PUBLIC_DOMAIN: ${{ vars.PUBLIC_DOMAIN }}
+          DEPLOYER_SETUP_TOKEN: ${{ secrets.DEPLOYER_SETUP_TOKEN }}
+        run: |
+          set -euo pipefail
+          source .github/scripts/vm-ssh.sh
+          need HOST "variable DEPLOYER_VM_HOST"; need SSH_KEY "secret DEPLOYER_VM_SSH_KEY"
+          need DEPLOYER_DOMAIN "variable DEPLOYER_DOMAIN"; need DEPLOYER_SETUP_TOKEN "secret DEPLOYER_SETUP_TOKEN"
+          connect
+          stage=$(mktemp -d); cp -r deploy/. "$stage/"
+          write_vars "$stage/vars.env" DEPLOYER_DOMAIN PUBLIC_DOMAIN DEPLOYER_SETUP_TOKEN
+          run_remote "$stage" setup-deployer-vm.sh | tee out.txt
+          {
+            echo "## Deployer VM is ready"
+            echo
+            echo "Save this as the variable \`DEPLOYER_VM_HOST_KEY\`, then run **Deploy the deployer**:"
+            echo
+            echo '```'
+            echo "$SEEN_HOST_KEY"
+            echo '```'
+            echo
+            echo "First sign-in: https://$DEPLOYER_DOMAIN/admin/setup with the code you saved as \`DEPLOYER_SETUP_TOKEN\`."
+            if [ -z "$HOST_KEY" ]; then echo; echo "The VM's key was accepted on first contact because \`DEPLOYER_VM_HOST_KEY\` was not set."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sites:
+    name: Sites VM
+    if: ${{ always() && inputs.target != 'deployer' && (needs.deployer.result == 'success' || needs.deployer.result == 'skipped') }}
+    needs: deployer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the deployer's public key
+        env:
+          SSH_KEY: ${{ secrets.DEPLOYER_VM_SSH_KEY }}
+          HOST: ${{ vars.DEPLOYER_VM_HOST }}
+          VM_USER: ${{ vars.DEPLOYER_VM_USER || 'ubuntu' }}
+          HOST_KEY: ${{ vars.DEPLOYER_VM_HOST_KEY }}
+        run: |
+          set -euo pipefail
+          source .github/scripts/vm-ssh.sh
+          need HOST "variable DEPLOYER_VM_HOST"; need SSH_KEY "secret DEPLOYER_VM_SSH_KEY"
+          connect
+          key=$(vm_ssh 'sudo cat /opt/deployer/keys/id_ed25519.pub') || { echo "::error::The deployer VM isn't set up yet. Run this workflow with target 'deployer' or 'both' first."; exit 1; }
+          echo "DEPLOYER_PUBLIC_KEY=$key" >> "$GITHUB_ENV"
+      - name: Set up the sites VM
+        env:
+          SSH_KEY: ${{ secrets.SITES_VM_SSH_KEY }}
+          HOST: ${{ vars.SITES_VM_HOST }}
+          VM_USER: ${{ vars.SITES_VM_USER || 'ubuntu' }}
+          HOST_KEY: ${{ vars.SITES_VM_HOST_KEY }}
+          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+          GHCR_USER: ${{ vars.GHCR_USER }}
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          source .github/scripts/vm-ssh.sh
+          need HOST "variable SITES_VM_HOST"; need SSH_KEY "secret SITES_VM_SSH_KEY"; need ACME_EMAIL "variable ACME_EMAIL"
+          if [ -z "$GHCR_TOKEN" ]; then echo "::warning::GHCR_READ_TOKEN is not set, so this VM can't pull the private Avrosphere image yet."; fi
+          connect
+          stage=$(mktemp -d); cp -r agent/. "$stage/"
+          write_vars "$stage/vars.env" DEPLOYER_PUBLIC_KEY ACME_EMAIL GHCR_USER GHCR_TOKEN
+          run_remote "$stage" setup-clubs-vm.sh
+          ip=$(vm_ssh "curl -fsS -m 5 https://checkip.amazonaws.com || true" | tr -d '[:space:]')
+          {
+            echo "## Sites VM is ready"
+            echo
+            echo "In the deployer, open **Servers** and add it with:"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Address | \`$HOST\` |"
+            echo "| Public IP | \`${ip:-(look it up in Lightsail)}\` |"
+            echo "| Host key | \`$SEEN_HOST_KEY\` |"
+            echo
+            echo "Then, in Lightsail, limit SSH (port 22) on this VM to the deployer VM's IP. Open it again for a moment whenever you re-run this workflow."
+            if [ -z "$HOST_KEY" ]; then echo; echo "The VM's key was accepted on first contact because \`SITES_VM_HOST_KEY\` was not set."; fi
+          } >> "$GITHUB_STEP_SUMMARY"

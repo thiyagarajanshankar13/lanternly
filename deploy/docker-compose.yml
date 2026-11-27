@@ -1,0 +1,36 @@
+# The deployer VM: the deployer app and Caddy for HTTPS (plus, with the
+# Avrosphere plugin, the AI assistant's model, which only the app can reach).
+# Lives in /opt/deployer with .env beside it (see setup-deployer-vm.sh).
+name: deployer
+
+services:
+  app:
+    image: ${DEPLOYER_IMAGE:?}
+    container_name: deployer-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DEPLOYER_DATA_DIR: /data
+      DEPLOYER_SSH_KEY_FILE: /keys/id_ed25519
+    volumes:
+      - /opt/deployer/data:/data
+      - /opt/deployer/keys:/keys:ro
+    networks: [deployer]
+
+
+  caddy:
+    image: caddy:2
+    container_name: deployer-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - /opt/deployer/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/deployer/caddy/data:/data
+      - /opt/deployer/caddy/config:/config
+    networks: [deployer]
+
+networks:
+  deployer:
