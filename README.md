@@ -1,4 +1,9 @@
-# Lanternly
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/lanternly-logo-dark.png">
+    <img src="brand/lanternly-logo-light.png" alt="Lanternly" width="320">
+  </picture>
+</h1>
 
 A small, self-hosted platform for running web apps and PostgreSQL databases on your own Linux servers, in the style of Railway or Render. You get a web console where you:
 
@@ -100,6 +105,10 @@ npm run typecheck
 - While a new app version starts, the app is briefly unavailable.
 - Apps have no volumes; data belongs in a database.
 - Some internal names (the default folder `/opt/avrosphere`, container prefix `avrosphere`) come from the project this was extracted from. Set `AGENT_ROOT` and `AGENT_NAMESPACE` on a new server to use your own.
+
+## Logo
+
+The lantern mark, logo and app icon are in [`brand/`](brand/). Amber `#fbbf24` (`#d97706` on white), flame gradient `#fde68a` to `#d97706`, wordmark in Space Grotesk Bold.
 
 ## Licence
 
