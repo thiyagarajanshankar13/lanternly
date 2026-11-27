@@ -15,7 +15,7 @@ To use your own domain, add a `CNAME` file holding just the domain (for example 
 The lantern mark and logo live in `brand/`:
 
 - `lanternly-mark.svg`: the mark for dark backgrounds (`lanternly-mark-on-light.svg` for white)
-- `lanternly-logo-dark.svg` / `lanternly-logo-light.svg`: mark + "Lanternly" wordmark
+- `lanternly-logo-dark.png` / `lanternly-logo-light.png`: mark + "Lanternly" wordmark (for dark / white backgrounds)
 - `lanternly-app-icon.svg` and the 512 px PNGs: square icon for avatars, the GitHub org and social cards
 
 Colours: amber `#fbbf24` (on white `#d97706`), flame gradient `#fde68a` → `#d97706`, glass `#1c1c20`, background `#0f0f11`. Wordmark font: Space Grotesk Bold.
