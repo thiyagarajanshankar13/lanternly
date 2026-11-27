@@ -1,0 +1,52 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`what live servers receive > PostgreSQL service: create 1`] = `
+[
+  {
+    "args": [
+      "db-create",
+      "shop-db",
+      "postgres:16",
+    ],
+    "stdin": "CLUBCTL_MEMORY_MB=256
+CLUBCTL_PROJECT=shop-db
+",
+  },
+]
+`;
+
+exports[`what live servers receive > app from a Docker image: create and deploy 1`] = `
+[
+  {
+    "args": [
+      "app-create",
+      "web",
+      "docker.io/library/nginx:1.27",
+      "www.example.com,web.avro.site",
+    ],
+    "stdin": "MODE=prod
+API_TOKEN=secret-1
+CLUBCTL_MEMORY_MB=128
+CLUBCTL_PORT=80
+CLUBCTL_HEALTH_PATH=/health
+CLUBCTL_PROJECT=web
+CLUBCTL_PREDEPLOY_B64=
+",
+  },
+  {
+    "args": [
+      "app-deploy",
+      "web",
+      "docker.io/library/nginx:1.28",
+    ],
+    "stdin": "MODE=prod
+API_TOKEN=secret-1
+CLUBCTL_MEMORY_MB=128
+CLUBCTL_PORT=80
+CLUBCTL_HEALTH_PATH=/health
+CLUBCTL_PROJECT=web
+CLUBCTL_PREDEPLOY_B64=
+",
+  },
+]
+`;

@@ -1,0 +1,51 @@
+# Shared services on a clubs VM: one Postgres for every club and Caddy for
+# HTTPS. setup-clubs-vm.sh passes NAMESPACE, SHARED_NET, APPS_NET and
+# AGENT_ROOT (agent.conf); the defaults are the names and folders of servers
+# set up before agent.conf (the same as avrosphere's deploy/lightsail/server).
+name: ${NAMESPACE:-avrosphere}-base
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: ${NAMESPACE:-avrosphere}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in the base/.env file}
+    volumes:
+      - ${AGENT_ROOT:-/opt/avrosphere}/postgres:/var/lib/postgresql/data
+    # No published port: only containers on the shared network reach it.
+    networks: [avrosphere]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2
+    container_name: ${NAMESPACE:-avrosphere}-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ${AGENT_ROOT:-/opt/avrosphere}/base/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${AGENT_ROOT:-/opt/avrosphere}/base/global.caddy:/etc/caddy/global.caddy:ro
+      - ${AGENT_ROOT:-/opt/avrosphere}/base/sites:/etc/caddy/sites:ro
+      - ${AGENT_ROOT:-/opt/avrosphere}/base/pages:/etc/caddy/pages:ro
+      - ${AGENT_ROOT:-/opt/avrosphere}/caddy/data:/data
+      - ${AGENT_ROOT:-/opt/avrosphere}/caddy/config:/config
+    # avro-apps (APPS_NET): apps built from GitHub repos (see docker-compose.app.yml).
+    networks: [avrosphere, avro-apps]
+
+networks:
+  # The keys are only names inside this file (kept so existing containers
+  # aren't recreated); the networks are SHARED_NET and APPS_NET.
+  avrosphere:
+    name: ${SHARED_NET:-avrosphere}
+  # Created by setup-clubs-vm.sh (and clubctl) before Caddy starts.
+  avro-apps:
+    name: ${APPS_NET:-avro-apps}
+    external: true

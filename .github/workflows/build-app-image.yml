@@ -1,0 +1,132 @@
+# Builds one app (a site of kind "app" on the deployer) from its GitHub repo.
+#
+# The deployer starts this with the GitHub App's token (workflow_dispatch) when
+# an app is created, when "Deploy latest" is pressed, or when someone pushes
+# to the app's branch. It finds the run by the request id in its name, waits
+# for it, then tells the sites server to pull and start the image.
+#
+#   ghcr.io/<owner>/app-<app name>:<first 12 characters of the commit>
+#
+# Only repos owned by this repository's owner can be built. The 10 newest
+# versions of each app image are kept, so "Roll back" works for those.
+#
+# Needs (Settings > Secrets and variables > Actions), saved by the deployer when
+# its GitHub App was made with "Connect GitHub", or added by hand:
+#   secret   APPS_GITHUB_APP_ID   the GitHub App's ID (the same one as in the deployer's Settings)
+#            (or a variable of that name, as older setups have; the secret wins)
+#   secret   APPS_GITHUB_APP_KEY  that GitHub App's private key (.pem)
+name: Build app image
+run-name: "Build app ${{ inputs.app }} at ${{ inputs.sha }} (${{ inputs.request }})"
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: The app's name on the deployer (lowercase, e.g. shop)
+        required: true
+      repo:
+        description: owner/name of the app's GitHub repo
+        required: true
+      sha:
+        description: The commit to build (40 characters)
+        required: true
+      dockerfile:
+        description: Path of the Dockerfile in the repo
+        default: Dockerfile
+        required: true
+      request:
+        description: Set by the deployer so it can find this run
+        default: manual
+        required: true
+concurrency:
+  group: app-image-${{ inputs.app }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - id: check
+        name: Check what was asked for
+        env:
+          APP: ${{ inputs.app }}
+          REPO: ${{ inputs.repo }}
+          SHA: ${{ inputs.sha }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$APP" | grep -Eq '^[a-z][a-z0-9-]{1,30}$' || { echo "::error::Bad app name"; exit 1; }
+          printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$' || { echo "::error::Give the full 40-character commit"; exit 1; }
+          printf '%s' "$REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || { echo "::error::Bad repo name"; exit 1; }
+          owner="${REPO%%/*}"
+          if [ "$(printf '%s' "$owner" | tr A-Z a-z)" != "$(printf '%s' "$OWNER" | tr A-Z a-z)" ]; then
+            echo "::error::Only repos owned by $OWNER can be built here"; exit 1
+          fi
+          case "$DOCKERFILE" in /*|*..*) echo "::error::The Dockerfile path must stay inside the repo"; exit 1 ;; esac
+          printf '%s' "$DOCKERFILE" | grep -Eq '^[A-Za-z0-9._/-]+$' || { echo "::error::Bad Dockerfile path"; exit 1; }
+          lower_owner="$(printf '%s' "$OWNER" | tr A-Z a-z)"
+          echo "name=${REPO#*/}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$lower_owner/app-$APP" >> "$GITHUB_OUTPUT"
+          echo "tag=${SHA:0:12}" >> "$GITHUB_OUTPUT"
+      - id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APPS_GITHUB_APP_ID || vars.APPS_GITHUB_APP_ID }}
+          private-key: ${{ secrets.APPS_GITHUB_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.check.outputs.name }}
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.sha }}
+          token: ${{ steps.token.outputs.token }}
+          persist-credentials: false
+      - name: Look for the Dockerfile
+        env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          [ -f "$DOCKERFILE" ] || { echo "::error::There is no $DOCKERFILE in this commit. Apps need a Dockerfile (see the deployer's docs)."; exit 1; }
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          push: true
+          # One plain amd64 image (the Lightsail VMs), no attestation pieces,
+          # so deleting old versions below can't break a kept one.
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          tags: ${{ steps.check.outputs.image }}:${{ steps.check.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ inputs.sha }}
+            avro.app=${{ inputs.app }}
+            avro.repo=${{ inputs.repo }}
+          cache-from: type=gha,scope=app-${{ inputs.app }}
+          cache-to: type=gha,mode=max,scope=app-${{ inputs.app }}
+      - name: Keep the 10 newest versions
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: app-${{ inputs.app }}
+          package-type: container
+          min-versions-to-keep: 10
+      - name: Summary
+        env:
+          IMAGE: ${{ steps.check.outputs.image }}:${{ steps.check.outputs.tag }}
+          REPO: ${{ inputs.repo }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          {
+            echo "### Built $IMAGE"
+            echo "From $REPO at \`$SHA\`. The deployer starts it on the sites server next."
+          } >> "$GITHUB_STEP_SUMMARY"

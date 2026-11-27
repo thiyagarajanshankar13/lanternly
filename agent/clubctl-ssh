@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Forced command for the deployer's SSH key (authorized_keys: command="…").
+# Whatever the deployer sends, only clubctl runs, with plainly-shaped words.
+set -euo pipefail
+read -r -a words <<< "${SSH_ORIGINAL_COMMAND:-}"
+(( ${#words[@]} >= 1 && ${#words[@]} <= 5 )) || { echo "clubctl-ssh: bad command" >&2; exit 2; }
+for w in "${words[@]}"; do
+  [[ "$w" =~ ^[A-Za-z0-9._:/@,-]+$ ]] || { echo "clubctl-ssh: bad word" >&2; exit 2; }
+done
+# clubctl sits next to this script (/opt/avrosphere/bin on servers set up before agent.conf).
+exec sudo -n "$(dirname "$(readlink -f "$0")")/clubctl" "${words[@]}"
