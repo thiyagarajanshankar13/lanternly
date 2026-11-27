@@ -1,0 +1,28 @@
+<!-- title: Upgrading Lanternly | desc: How to update the console and clubctl to a new Lanternly release, and what happens to the database. -->
+<p class="lead">An upgrade has two parts: the console on the deployer VM, and <code>clubctl</code> on each services VM when a release changes it. Your services keep running throughout.</p>
+
+<h2>Before you upgrade</h2>
+<ul>
+<li>Read the release notes. They say when servers need the new <code>clubctl</code>, and about any new required setting.</li>
+<li>Copy <code>/opt/deployer/data</code> somewhere safe (it's small). The console's database is migrated forward on start and can't be migrated back.</li>
+</ul>
+
+<h2>Upgrade the console</h2>
+<h3>With GitHub Actions</h3>
+<p>If you use the <strong>Deploy the deployer</strong> workflow, merge the new release into your copy's <code>main</code> branch. The workflow builds the image and restarts the console.</p>
+<h3>By hand</h3>
+<pre><code>cd lanternly
+git pull
+sudo docker build -t deployer .
+cd /opt/deployer &amp;&amp; sudo env DEPLOYER_IMAGE=deployer docker compose up -d</code></pre>
+<p>On start, the console applies any new database migrations (they're numbered and only ever added, never edited). Operations that were running when it stopped are picked up again.</p>
+
+<h2>Update clubctl on servers</h2>
+<p>When the release notes say so, run the setup again on each services VM with the new <code>agent/</code> folder (same values as the first time), or run the <strong>Set up a VM</strong> workflow for it. Running containers aren't recreated.</p>
+<pre><code>sudo DEPLOYER_PUBLIC_KEY="ssh-ed25519 AAAA… deployer" \
+     ACME_EMAIL=you@example.com ./setup-clubs-vm.sh</code></pre>
+<p>Servers keep their <code>AGENT_ROOT</code> and <code>AGENT_NAMESPACE</code> from <code>agent.conf</code>, so you don't need to pass them again.</p>
+<p>Servers made by the AWS plugin are updated the same way (point the workflow at the server's address).</p>
+
+<h2>Upgrading Ubuntu or Docker</h2>
+<p>Normal OS updates are fine. For a reboot, the containers restart by themselves. For a bigger change, such as a new Ubuntu release, it's often easier to create a fresh server, restore each service onto it as a copy, move domains and remove the old one.</p>

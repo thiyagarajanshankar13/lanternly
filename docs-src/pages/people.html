@@ -1,0 +1,41 @@
+<!-- title: People and access | desc: Owners, operators and viewers; access per project or per service; invites, two-step sign-in, suspending people and the access log. -->
+<p class="lead">Everyone signs in with a password and an authenticator app. Owners decide who else can sign in, and which projects and services each person can see and change.</p>
+
+<h2>Roles</h2>
+<div class="table"><table>
+<tr><th></th><th>Owner</th><th>Operator</th><th>Viewer</th></tr>
+<tr><td>Status, versions, addresses, monitoring, logs (latest and live), builds</td><td>everything</td><td>their services</td><td>their services</td></tr>
+<tr><td>Deploy, restart, pause, roll back, settings, domains, back up now, backup schedule</td><td>yes</td><td>their services</td><td>no</td></tr>
+<tr><td>Add apps and databases to a project; database password, upgrade and dumps</td><td>yes</td><td>their whole projects</td><td>no</td></tr>
+<tr><td>Create, remove or restore services; make, delete or move projects; servers, settings, plugins, backups page, people, access log</td><td>yes</td><td>no</td><td>no</td></tr>
+</table></div>
+<p>A service that isn't on someone's list doesn't exist for them: it's not on any list, and its page answers "not found".</p>
+
+<h2>What someone can see</h2>
+<p>Each operator or viewer has a list:</p>
+<ul>
+<li><strong>Everything, including services added later</strong>, or</li>
+<li><strong>Whole projects</strong>: everything in the projects you tick, including services added to them later. An operator of a project can also add apps and databases to it.</li>
+<li><strong>Single services</strong> you tick.</li>
+</ul>
+<p>Changes apply at once. There's always at least one owner, and you can't remove or demote yourself.</p>
+
+<h2>Invite someone</h2>
+<ol class="steps">
+<li>Open <strong>People → Invite someone</strong>, type their name and email, pick a role and what they can see.</li>
+<li>Press <strong>Invite</strong>. Copy the link from the bottom of the page and send it, or tick <strong>Also email them the link</strong> once outgoing email is set up.</li>
+<li>They open the link, choose a password and scan the QR code with an authenticator app. The link works once, for 72 hours. If it runs out, open them under People and press <strong>Make a new invite link</strong>.</li>
+</ol>
+
+<h2>Change or remove access</h2>
+<p>Press <strong>Edit</strong> beside a person to change their name, role or list, or:</p>
+<ul>
+<li><strong>Reset two-step sign-in</strong> for a lost phone: they set it up again at their next sign-in.</li>
+<li><strong>Suspend</strong>: signed out at once and can't sign in; their access is kept for when you let them back.</li>
+<li><strong>Remove</strong>: type their email to confirm.</li>
+</ul>
+<p><strong>Your account</strong> in the side menu shows what you can do and lets you change your password (you're signed out everywhere and sign in again with the new one).</p>
+
+<h2>Access log</h2>
+<p><strong>Activity → Access log</strong> (owners only) records sign-ins and failed sign-ins, invites and access changes, changes to settings, servers, GitHub, the backup bucket and plugins, backup key reveals, database password reveals, restores, and who read which service's logs (one line per person per service per hour). Each line has the time and IP address, and the log is kept for a year.</p>
+<p>Changes to services themselves are under <strong>Activity → Changes</strong>, with who made each one and its output.</p>

@@ -1,0 +1,38 @@
+<!-- title: Docker images | desc: Run a ready-made Docker image from Docker Hub, ghcr.io or a private registry, pinned to its digest, with or without a web address. -->
+<p class="lead">Run an image someone has already built, such as <code>nginx</code>, <code>redis</code> or <code>louislam/uptime-kuma</code>, with no GitHub repo involved.</p>
+
+<h2>Add an image service</h2>
+<ol class="steps">
+<li>Open a project and press <strong>New service → Docker image</strong>.</li>
+<li><strong>Image</strong>: a name and tag such as <code>nginx:1.27</code>, <code>bitnami/redis:7.4</code>, <code>ghcr.io/owner/app:v2</code> or <code>image@sha256:…</code>, or paste the image's link from hub.docker.com. Pick a version tag rather than <code>latest</code> so every restart runs the same thing.</li>
+<li><strong>Name</strong>: other services in the project reach it by this name.</li>
+<li><strong>Private image</strong> (optional): a registry user name and a read-only access token (on Docker Hub: Account settings → Personal access tokens). Don't use your password. The token is stored encrypted and only used for each pull.</li>
+<li><strong>Give it a web address</strong>: leave it ticked for a website. Untick it for things only the project uses, such as a cache or a worker: it then has no address on the internet and isn't monitored.</li>
+<li><strong>Port</strong>: the port the image listens on (its Docker Hub page usually says: 80 for nginx, 6379 for Redis). <strong>Health page</strong>: a page that answers once it's ready, or empty when the image serves no web pages.</li>
+<li><strong>Settings</strong>: the environment variables the image reads. Database links and <code>${{db.VAR}}</code> references work as they do for apps.</li>
+<li>Press <strong>Create service</strong>. The image is pulled and started, usually in under a minute.</li>
+</ol>
+
+<h2>Pinned to a digest</h2>
+<p>When an image is pulled, the server runs the exact digest it got and the console records it (<code>Pinned to nginx@sha256:…</code>). A tag that's later moved on Docker Hub doesn't change what's running until you ask for it.</p>
+<ul>
+<li><strong>Pull again</strong> fetches the tag again and starts what it points to now.</li>
+<li><strong>Versions</strong> lists each digest that has run, with <strong>Roll back</strong>.</li>
+<li><strong>Settings</strong> changes the image (pulling and starting the new one), the sign-in, web address, port, health page, memory and settings.</li>
+</ul>
+
+<h2>Examples</h2>
+<div class="table"><table>
+<tr><th>What</th><th>Image</th><th>Web address</th><th>Port</th><th>Health page</th></tr>
+<tr><td>Static site or proxy</td><td><code>nginx:1.27</code></td><td>yes</td><td>80</td><td><code>/</code></td></tr>
+<tr><td>Cache for your app</td><td><code>redis:7.4</code></td><td>no</td><td>6379</td><td>empty</td></tr>
+<tr><td>Uptime dashboard</td><td><code>louislam/uptime-kuma:1</code></td><td>yes</td><td>3001</td><td><code>/</code></td></tr>
+<tr><td>Background worker from your registry</td><td><code>ghcr.io/acme/worker:2.3.0</code></td><td>no</td><td>any</td><td>empty</td></tr>
+</table></div>
+<p>An app in the same project reaches the Redis above at <code>redis://&lt;name&gt;:6379</code>.</p>
+
+<h2>Limits</h2>
+<ul>
+<li>No volumes yet: anything the container writes is lost when it restarts or updates. Keep data in a project database.</li>
+<li>The image's own start command is used; there's no override.</li>
+</ul>

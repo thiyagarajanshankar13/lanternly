@@ -1,0 +1,50 @@
+<!-- title: How it fits together | desc: The parts of Lanternly: the console, servers, clubctl, projects, services, operations and what runs where. -->
+<p class="lead">A few words come up on every page of the console. Here's what they mean and how the pieces talk to each other.</p>
+
+<h2>The console</h2>
+<p>The console is a Next.js app with a SQLite database, running on the deployer VM behind Caddy. It keeps the list of servers, projects and services, the settings, people and the access log. Secrets it has to keep (app secret settings, registry tokens, bucket keys, SMTP password, two-step sign-in secrets) are encrypted with AES-256-GCM under <code>DEPLOYER_SECRET_KEY</code>.</p>
+<p>It doesn't run your apps. Every change becomes an <strong>operation</strong> that it carries out on a server over SSH.</p>
+
+<h2>Servers</h2>
+<p>A server is any Ubuntu VM that has been prepared with <code>agent/setup-clubs-vm.sh</code>. That script installs Docker, Caddy and <code>clubctl</code>, and creates a <code>deployer</code> user whose SSH key may only run <code>clubctl</code>. The console saves each server's host key when you add it and refuses to talk to a server that presents a different one.</p>
+<p>Each server has a memory figure and a limit on how many services it holds, so new services only go where they fit. See <a href="servers.html">Servers</a>.</p>
+
+<h2>clubctl</h2>
+<p><code>clubctl</code> is a Bash tool on each server that does the real work, with a fixed list of commands: create, configure, deploy, pause, resume, back up, restore, remove, status and logs, plus database commands (create, stats, credentials, rotate, read-only, upgrade). Each service is a Docker Compose project in its own folder under <code>AGENT_ROOT</code>, with containers named <code>&lt;namespace&gt;-&lt;service&gt;</code>.</p>
+<p>Caddy on the same server serves every web address over HTTPS and asks Let's Encrypt for a certificate per address.</p>
+
+<h2>Projects</h2>
+<p>A project groups the services that make up one product: for example a web app, a worker and a database. Every project runs on one server and has its own Docker network, where each service is reachable by its name (<code>shop-db:5432</code>). Services in one project can't reach services in another.</p>
+<p>Inside a project, the console draws the services as a diagram in three rows:</p>
+<ul>
+<li><strong>On the web</strong>: apps with a web address.</li>
+<li><strong>Inside the project</strong>: services with no address, such as a worker or Redis. Only the project's other services reach them.</li>
+<li><strong>Databases</strong>: the project's PostgreSQL databases.</li>
+</ul>
+<p>A line runs from each app to the databases it uses. Click a service to see its status, addresses, image or version, size, memory and links beside the diagram; <strong>Open service</strong> goes to its own page. On a phone the diagram becomes a list. The Projects list shows a small map of each project, its health and, with the AWS plugin, a monthly estimate; <strong>Needs attention</strong> filters to projects with a failed or stopped service or a nearly full database.</p>
+
+<h2>Services</h2>
+<p>A service is one running thing in a project. The core has three kinds:</p>
+<div class="table"><table>
+<tr><th>Kind</th><th>Comes from</th><th>Page</th></tr>
+<tr><td>App from GitHub</td><td>A repo and branch with a Dockerfile, built on GitHub Actions</td><td><a href="github-apps.html">Apps from GitHub</a></td></tr>
+<tr><td>Docker image</td><td>A ready-made image from any registry</td><td><a href="docker-images.html">Docker images</a></td></tr>
+<tr><td>PostgreSQL</td><td>The official <code>postgres</code> image, managed for you</td><td><a href="postgres.html">PostgreSQL</a></td></tr>
+</table></div>
+<p>S3 storage (MinIO) is on its way as a fourth kind (<a href="s3-storage.html">S3 storage</a>), and plugins can add their own (<a href="plugins.html">Plugins</a>).</p>
+<p>Every service has a page with its status, <strong>Logs</strong> (latest lines or <strong>Live</strong>, with secrets masked), <strong>History</strong> (every change with its output and who made it), <strong>Pause</strong>/<strong>Resume</strong> and <strong>Settings</strong>.</p>
+
+<h2>Operations</h2>
+<p>Creating, deploying, configuring, pausing, backing up and removing are queued as operations. One operation runs at a time across all servers, so two changes never fight over the same service. App builds run on GitHub, outside that queue, and only the deploy that follows is queued.</p>
+<p>Each operation's output is kept in the service's <strong>History</strong>, and <strong>Activity → Changes</strong> lists every operation with who started it.</p>
+
+<h2>What lives where</h2>
+<div class="table"><table>
+<tr><th>Thing</th><th>Where it lives</th></tr>
+<tr><td>Services, settings, people, access log</td><td>Console's SQLite database, <code>/opt/deployer/data</code></td></tr>
+<tr><td>App secret settings, tokens, bucket keys</td><td>Console database, encrypted</td></tr>
+<tr><td>Database passwords</td><td>Only on the services VM. Shown in the console on request, and every reveal is logged.</td></tr>
+<tr><td>Containers, volumes, certificates</td><td>Services VM, under <code>AGENT_ROOT</code></td></tr>
+<tr><td>App images</td><td>Your registry (ghcr.io for GitHub builds)</td></tr>
+<tr><td>Backups</td><td>Your S3 bucket, encrypted with the backup key</td></tr>
+</table></div>

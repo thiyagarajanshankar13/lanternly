@@ -1,0 +1,94 @@
+<!-- title: Apps from GitHub | desc: Connect GitHub in one click, deploy any repo and branch with a Dockerfile, build on GitHub Actions, deploy on push, roll back and run pre-deploy commands. -->
+<p class="lead">Deploy any repo and branch that has a <code>Dockerfile</code>. Images are built on GitHub Actions, so building costs your servers nothing, and every push to the branch can deploy itself.</p>
+
+<h2>Connect GitHub</h2>
+<p>Lanternly talks to GitHub through a GitHub App it creates for you, so there are no keys to copy.</p>
+<ol class="steps">
+<li>Make sure <code>DEPLOYER_URL</code> is the console's public <code>https://</code> address, so GitHub can send pushes to it.</li>
+<li>Open <strong>Settings → GitHub apps → Connect GitHub</strong>.</li>
+<li>Enter the <strong>GitHub organisation or user</strong> whose repos you'll deploy, and <strong>Builds run in</strong>: your copy of the Lanternly repo (for example <code>my-company/lanternly</code>), which holds the build workflow.</li>
+<li>Press <strong>Create GitHub app</strong>. GitHub asks you to confirm the new app's name.</li>
+<li>Install it on your Lanternly repo plus the repos you'll deploy, and you're sent back to the console.</li>
+</ol>
+<p>The console saves the app's ID, private key and webhook secret (encrypted) and copies the ID and key into your Lanternly repo's Actions secrets so the build workflow can use them. The GitHub page then shows <strong>Connected</strong>, the repos it's installed on, and buttons to <strong>Add repos</strong> and <strong>Check the connection</strong>.</p>
+<p>An app already in use keeps working until the new one is installed.</p>
+
+<h3>Using a GitHub App you made yourself</h3>
+<p>Under <strong>Settings → GitHub apps by hand</strong>, enter the App ID, the organisation, the repo builds run in, the private key (<code>.pem</code>) and the webhook secret. The app needs:</p>
+<ul>
+<li>Repository permissions: <strong>Contents</strong> read, <strong>Metadata</strong> read, <strong>Actions</strong> read and write, and optionally <strong>Secrets</strong> read and write (so the console can save the build secrets itself).</li>
+<li>Webhook address <code>https://admin.example.com/api/github/webhook</code>, subscribed to the <strong>Push</strong> event.</li>
+</ul>
+<p>Without the Secrets permission, add the repo variable <code>APPS_GITHUB_APP_ID</code> and secret <code>APPS_GITHUB_APP_KEY</code> to your Lanternly repo by hand.</p>
+
+<h2>What your repo needs</h2>
+<ul>
+<li>A <code>Dockerfile</code> (at the root, or tell the console its path).</li>
+<li>One web port the app listens on. The app gets <code>PORT</code> as a setting; default 3000.</li>
+<li>Ideally a health page that answers once the app is ready, such as <code>/health</code>.</li>
+</ul>
+<pre><code><span class="c"># A minimal Node app</span>
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+EXPOSE 3000
+CMD ["node", "server.js"]</code></pre>
+
+<h2>Add an app</h2>
+<ol class="steps">
+<li>Open a project and press <strong>New service → App from GitHub</strong>.</li>
+<li>Pick the <strong>repository</strong> and <strong>branch</strong>. Only repos the GitHub App is installed on are listed.</li>
+<li>Give it a short <strong>name</strong>: its address becomes <code>&lt;name&gt;.example.com</code> and other services in the project reach it by this name.</li>
+<li>Change the advanced fields if needed: <strong>Dockerfile</strong> path, <strong>port</strong>, <strong>health page</strong>, memory.</li>
+<li>Add <strong>settings</strong> and <strong>secret settings</strong>, one <code>NAME=value</code> per line. Secret ones are stored encrypted, masked in logs and never shown again.</li>
+<li>Under <strong>Databases</strong>, tick a database to link, or <strong>Create a new PostgreSQL database for it</strong>. See <a href="postgres.html#link-a-database-to-an-app">Link a database</a>.</li>
+<li>Optionally a <strong>Pre-deploy command</strong> such as <code>npm run migrate</code>.</li>
+<li>Press <strong>Create app</strong>.</li>
+</ol>
+<p>GitHub builds the image (usually one to five minutes; <strong>Watch the build on GitHub</strong> links to the run), then the console starts it and gives it its address with HTTPS.</p>
+
+<h2>How builds work</h2>
+<p>The console starts <code>.github/workflows/build-app-image.yml</code> in your Lanternly repo with the app's repo, commit and Dockerfile. The workflow checks out the app repo with a short-lived token from the GitHub App, builds a <code>linux/amd64</code> image and pushes it to <code>ghcr.io/&lt;owner&gt;/app-&lt;name&gt;:&lt;commit&gt;</code>, keeping the newest 10 versions. The console follows the run and, once it succeeds, deploys that image.</p>
+<ul>
+<li>A commit that was already built is deployed without building again.</li>
+<li>A build that doesn't start within 5 minutes, or takes over 45, counts as failed. A failed build never touches the running app.</li>
+<li>Builds use your GitHub Actions minutes. Public repos build free.</li>
+</ul>
+
+<h2>The app's page</h2>
+<ul>
+<li><strong>Deploy latest</strong> builds the newest commit on the branch and swaps it in.</li>
+<li><strong>Deploy every push to the branch by itself</strong> (in Settings) does the same on each push, through the GitHub webhook.</li>
+<li><strong>Versions</strong> lists each commit that has run. <strong>Roll back</strong> starts an earlier one in seconds, with no rebuild.</li>
+<li><strong>Builds</strong> lists every build with its result and a link to its GitHub log.</li>
+<li><strong>Settings</strong> changes the branch, Dockerfile, port, health page, memory, settings, secrets, databases and pre-deploy command. Changing the branch or Dockerfile starts a new build.</li>
+<li><strong>Logs</strong>: the latest 200 to 2,000 lines, or <strong>Live</strong> to watch new ones, with filter, pause and download. Secret values are blanked out.</li>
+<li><strong>Pause</strong> shows visitors a "paused" page; <strong>Resume</strong> brings the app back.</li>
+<li><strong>More → Custom domain</strong>, <strong>Move to project</strong> and <strong>Remove</strong>.</li>
+</ul>
+<p>If the very first build fails, the page says <strong>This app wasn't created</strong> but keeps <strong>Settings</strong>: fix the branch, Dockerfile or port, press <strong>Save</strong>, then <strong>Build and try again</strong>.</p>
+
+<h2>Health checks and safe deploys</h2>
+<p>A new version must answer its health page (any status under 400) within 2 minutes. If it doesn't, the previous version is started again and the deploy is marked failed, with the output in History. With no health page, "running and not restarting" is enough.</p>
+<p>While a new version starts, the app is briefly unavailable.</p>
+
+<h2>Pre-deploy command</h2>
+<p>A command that runs once for every new version, with the app's settings and linked databases, before it takes over: usually database migrations. It runs in a throwaway container of the new image on the project's network, with a 15-minute limit. If it fails, the version already running keeps running and the output is on the app's page.</p>
+
+<h2>Settings an app gets</h2>
+<div class="table"><table>
+<tr><th>Setting</th><th>Where it comes from</th></tr>
+<tr><td><code>PORT</code></td><td>The port you set. You can't override it in settings.</td></tr>
+<tr><td>Your settings and secrets</td><td>The app's Settings.</td></tr>
+<tr><td><code>DATABASE_URL</code>, <code>PGHOST</code>, <code>PGPORT</code>, <code>PGUSER</code>, <code>PGPASSWORD</code>, <code>PGDATABASE</code></td><td>Each linked database (with its prefix, if any).</td></tr>
+<tr><td><code>${{shop-db.DATABASE_URL}}</code> in any value</td><td>Filled in on the server from a database in the same project.</td></tr>
+</table></div>
+
+<h2>Limits</h2>
+<ul>
+<li>Apps have no volumes yet: anything written inside the container is lost on the next deploy. Keep data in a <a href="postgres.html">database</a> (or <a href="s3-storage.html">S3 storage</a> once it ships).</li>
+<li>One build at a time per app.</li>
+<li>Apps get 1 CPU, a memory limit, a process limit and <code>no-new-privileges</code>.</li>
+</ul>

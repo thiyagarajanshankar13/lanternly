@@ -1,0 +1,36 @@
+<!-- title: Domains and HTTPS | desc: Service addresses under your domain, custom domains with a CNAME or A record, automatic Let's Encrypt certificates and Retry HTTPS. -->
+<p class="lead">Every service with a web address gets <code>&lt;name&gt;.example.com</code> with a free HTTPS certificate, and you can add as many custom domains as you like.</p>
+
+<h2>Your base domain</h2>
+<p>Under <strong>Settings → Edit settings → Domain services live under</strong>, set the domain your wildcard DNS record points at (for example <code>example.com</code>). A service named <code>shop</code> then gets <code>shop.example.com</code>. Names like <code>www</code>, <code>admin</code> and <code>api</code> are reserved; add more under <strong>Branding → More reserved names</strong>.</p>
+<p>A service's name, and so its base address, can't change after it's created. Add a custom domain instead.</p>
+
+<h2>Add a custom domain</h2>
+<ol class="steps">
+<li>At the domain's DNS provider, add <strong>one record</strong>:
+<ul>
+<li>for a subdomain such as <code>www.shop.com</code> or <code>app.shop.com</code>: a <strong>CNAME</strong> to the service's address (<code>shop.example.com</code>);</li>
+<li>for a bare domain (<code>shop.com</code>): an <strong>A record</strong> to the server's public IP.</li>
+</ul>
+The service's page shows both values.</li>
+<li>On the service's page, open <strong>More → Custom domain</strong> (or <strong>Add a custom domain</strong>), enter the domain and press <strong>Add domain</strong>. The console checks the record is in place first.</li>
+<li>The server asks Let's Encrypt for a certificate within a minute. That only works once DNS points at the server, so add the record first.</li>
+</ol>
+<p>A bare domain and <code>www.</code> are two addresses: add the A record and the CNAME, then add each one on the service's page.</p>
+
+<h3>Main address</h3>
+<p>The first custom domain becomes the service's <strong>main</strong> address. With several, press <strong>Make main</strong> to choose. The <code>example.com</code> address keeps working.</p>
+
+<h2>When HTTPS doesn't work</h2>
+<p>If a domain was added before its DNS pointed at the server (with <strong>Add anyway</strong>, or the record changed later), visitors see a security error and the server waits longer before each new try. Once the record is right, press <strong>Retry HTTPS</strong> under <strong>Addresses</strong> and the server asks again straight away. The output lists which addresses have a certificate.</p>
+<ul>
+<li>DNS changes can take a few minutes to an hour to appear.</li>
+<li>If your own computer still shows the old site, it's remembering the old DNS record: try another device or mobile data, or wait.</li>
+<li>Check the record from anywhere with <code>dig +short www.shop.com</code>.</li>
+</ul>
+
+<h2>Certificate limits</h2>
+<p>Certificates are issued per address. Let's Encrypt allows about 50 new certificates a week per registered domain, so creating many services under one base domain in a single week can hit that limit. Monitoring warns 14 and 3 days before any certificate runs out (renewal is automatic, so a warning means something is wrong).</p>
+
+<h2>The console's own address</h2>
+<p>The console's domain is set when you set up the deployer VM (<code>DEPLOYER_DOMAIN</code>). To move it, point the new name's DNS at the deployer VM and run <code>setup-deployer-vm.sh</code> again with the new <code>DEPLOYER_DOMAIN</code>: it rewrites Caddy's config and <code>DEPLOYER_URL</code> and reloads Caddy. Then restart the console with <code>cd /opt/deployer &amp;&amp; sudo docker compose up -d</code>. If you use Connect GitHub, connect again so GitHub sends pushes to the new address.</p>

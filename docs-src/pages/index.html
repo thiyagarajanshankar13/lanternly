@@ -1,0 +1,58 @@
+<!-- title: Introduction | desc: Lanternly is an open-source, self-hosted deploy console for apps, Docker images and PostgreSQL on your own Linux servers over SSH. -->
+<p class="lead">Lanternly is a deploy console you host yourself. It runs web apps, Docker images and PostgreSQL databases on your own Linux servers, gives each one an HTTPS address, backs them up to any S3 bucket and tells you when something goes down.</p>
+
+<p>Think of it as a small Railway or Render that lives on two VMs you control. You pay your cloud provider and nothing else: no seats, no usage meter, no data leaving your servers.</p>
+
+<div class="cards">
+<a class="card" href="quick-start.html"><b>Try it in 5 minutes</b><span>Run the console on your laptop in practice mode, with a simulated server and GitHub.</span></a>
+<a class="card" href="install.html"><b>Install on your servers</b><span>DNS, two Ubuntu VMs, the first owner account and your first app.</span></a>
+<a class="card" href="concepts.html"><b>How it fits together</b><span>Servers, projects, services, operations and what runs where.</span></a>
+<a class="card" href="aws.html"><b>Amazon Web Services plugin</b><span>Create Lightsail servers from the console and see your AWS bill in your currency.</span></a>
+</div>
+
+<h2>What you can do with it</h2>
+<ul>
+<li><strong>Deploy from GitHub.</strong> Any repo and branch with a <code>Dockerfile</code>. Images are built on GitHub Actions, every push can deploy itself, and Roll back starts an earlier version without rebuilding. <a href="github-apps.html">Apps from GitHub</a></li>
+<li><strong>Run any Docker image.</strong> Docker Hub, ghcr.io or a private registry, pinned to the exact digest that was pulled. <a href="docker-images.html">Docker images</a></li>
+<li><strong>Group services into projects.</strong> Each project has its own private network: services find each other by name, and projects can't see each other. <a href="concepts.html#projects">Projects</a></li>
+<li><strong>PostgreSQL, looked after.</strong> One tick links a database to an app. Password rotation, major-version upgrades with roll back, dumps, and a size quota with alerts. <a href="postgres.html">PostgreSQL</a></li>
+<li><strong>HTTPS and your own domains.</strong> Every service gets an address under your domain with a free certificate, and a CNAME adds a custom domain. <a href="domains.html">Domains and HTTPS</a></li>
+<li><strong>Encrypted backups to any S3 bucket.</strong> AWS S3, Backblaze B2, Cloudflare R2, MinIO and others, encrypted before upload, on a schedule, restorable into a copy first. <a href="backups.html">Backups</a></li>
+<li><strong>Monitoring with email alerts.</strong> For the services Lanternly runs and for sites hosted anywhere else. <a href="monitoring.html">Monitoring</a></li>
+<li><strong>Team access.</strong> Owners, operators and viewers, per project or per service, with two-step sign-in for everyone and an access log. <a href="people.html">People and access</a></li>
+<li><strong>Plugins.</strong> Add service kinds, pages and settings without touching the core. The included AWS plugin creates Lightsail servers and reports costs. <a href="plugins.html">Plugins</a></li>
+</ul>
+
+<h2>How it works in one picture</h2>
+<div class="diagram" role="img" aria-label="The deployer VM runs the console and Caddy, and reaches each services VM over SSH, where clubctl runs apps and databases behind Caddy.">
+<svg viewBox="0 0 760 250" width="760" xmlns="http://www.w3.org/2000/svg" font-family="Inter, sans-serif">
+<rect x="10" y="30" width="260" height="190" rx="14" fill="#1a1a1f" stroke="#34343c"/>
+<text x="30" y="60" fill="#fafafa" font-size="15" font-weight="600">Deployer VM</text>
+<text x="30" y="80" fill="#a1a1aa" font-size="12">admin.example.com</text>
+<rect x="30" y="98" width="220" height="40" rx="9" fill="#111113" stroke="#2e2e35"/><text x="44" y="123" fill="#d4d4d8" font-size="13">Caddy (HTTPS)</text>
+<rect x="30" y="150" width="220" height="50" rx="9" fill="#2a1f0a" stroke="#5c3d0a"/><text x="44" y="172" fill="#fcd34d" font-size="13" font-weight="600">Lanternly console</text><text x="44" y="190" fill="#d4d4d8" font-size="12">Next.js + SQLite, queue</text>
+<path d="M280 175 H470" stroke="#fbbf24" stroke-width="2" marker-end="url(#ar)"/>
+<text x="300" y="164" fill="#fbbf24" font-size="12.5">SSH, clubctl only</text>
+<text x="300" y="196" fill="#a1a1aa" font-size="12">host key pinned</text>
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#fbbf24"/></marker></defs>
+<rect x="480" y="10" width="270" height="230" rx="14" fill="#1a1a1f" stroke="#34343c"/>
+<text x="500" y="40" fill="#fafafa" font-size="15" font-weight="600">Services VM(s)</text>
+<text x="500" y="60" fill="#a1a1aa" font-size="12">*.example.com + custom domains</text>
+<rect x="500" y="76" width="230" height="36" rx="9" fill="#111113" stroke="#2e2e35"/><text x="514" y="99" fill="#d4d4d8" font-size="13">Caddy (HTTPS per address)</text>
+<rect x="500" y="122" width="110" height="46" rx="9" fill="#111113" stroke="#2e2e35"/><text x="512" y="142" fill="#fafafa" font-size="12.5">shop-web</text><text x="512" y="159" fill="#4ade80" font-size="11">● Live</text>
+<rect x="620" y="122" width="110" height="46" rx="9" fill="#111113" stroke="#2e2e35"/><text x="632" y="142" fill="#fafafa" font-size="12.5">shop-db</text><text x="632" y="159" fill="#a1a1aa" font-size="11">PostgreSQL</text>
+<rect x="500" y="178" width="230" height="44" rx="9" fill="#111113" stroke="#2e2e35"/><text x="514" y="205" fill="#d4d4d8" font-size="12.5">clubctl · Docker</text>
+</svg>
+</div>
+<p>The console never gets a shell on your servers. Its SSH key is locked to one program, <code>clubctl</code>, which accepts a fixed list of commands and checks every argument. More in <a href="concepts.html">How it fits together</a> and <a href="security.html">Security</a>.</p>
+
+<h2>What you need</h2>
+<ul>
+<li>Two Ubuntu 24.04 VMs with a static IP and ports 22, 80 and 443 open: a small one for the console (2 GB) and one or more for your services (4 GB or more). Any provider works.</li>
+<li>A domain whose DNS you control.</li>
+<li>A GitHub account, if you want to deploy from repos.</li>
+<li>An S3-compatible bucket, if you want backups.</li>
+</ul>
+
+<h2>Licence</h2>
+<p>Lanternly is free software under the <a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/LICENSE">GNU Affero General Public License v3.0</a>. Use it for your own work or your clients'. If you run a modified version as a service for other people, you must offer them its source.</p>

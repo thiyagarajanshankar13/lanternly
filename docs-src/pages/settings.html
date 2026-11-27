@@ -1,0 +1,29 @@
+<!-- title: Settings and branding | desc: Base domain, time zone, outgoing email, branding (name, logo, locale, reserved names), GitHub and plugins. -->
+<p class="lead">Settings holds the defaults for every service. Only owners can open it.</p>
+
+<h2>Addresses</h2>
+<ul>
+<li><strong>Domain services live under</strong>: the domain your wildcard DNS points at, such as <code>example.com</code>. A service named <code>shop</code> gets <code>shop.example.com</code>. Nothing can be created until it's set.</li>
+<li><strong>Default time zone</strong>: used for backup schedules and dates.</li>
+</ul>
+
+<h2>Outgoing email</h2>
+<p>An SMTP account the console sends through: monitoring, database, backup and cost alerts, invites and tests. Fill in the SMTP server, user name, password (stored encrypted) and sender address. Any provider works (Amazon SES, Postmark, Mailgun, your own mail server). Until it's set, alerts aren't emailed and pages say so.</p>
+
+<h2>Branding and region</h2>
+<ul>
+<li><strong>Name</strong>: shown in the side menu, on the sign-in page and in the authenticator app.</li>
+<li><strong>Line under the name</strong> (optional): also ends every page title.</li>
+<li><strong>Logo address</strong> (optional): an image URL. Empty shows the built-in mark.</li>
+<li><strong>Locale</strong>: how dates and numbers are written, such as <code>en-US</code>, <code>en-GB</code> or <code>de-DE</code>.</li>
+<li><strong>More reserved names</strong>: names no service may take, on top of <code>www</code>, <code>admin</code>, <code>api</code> and the like.</li>
+</ul>
+
+<h2>GitHub apps</h2>
+<p>The GitHub App used to build and deploy apps: <strong>Connect GitHub</strong> creates one for you, or enter one by hand. Also the default memory limit per app. See <a href="github-apps.html#connect-github">Connect GitHub</a>.</p>
+
+<h2>Plugins</h2>
+<p><strong>Manage plugins</strong> lists the installed plugins with what each adds; turn them on or off, and open a plugin's own settings. Turning a plugin off hides what it adds but never stops anything it created. See <a href="plugins.html">Plugins</a>.</p>
+
+<h2>People</h2>
+<p>Who can sign in is on its own page in the side menu. See <a href="people.html">People and access</a>.</p>

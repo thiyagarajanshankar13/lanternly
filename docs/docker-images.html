@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docker images · Lanternly docs</title>
+<meta name="description" content="Run a ready-made Docker image from Docker Hub, ghcr.io or a private registry, pinned to its digest, with or without a web address.">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Docker images · Lanternly docs">
+<meta property="og:description" content="Run a ready-made Docker image from Docker Hub, ghcr.io or a private registry, pinned to its digest, with or without a web address.">
+<meta name="theme-color" content="#0f0f11">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to the page</a>
+<header class="top">
+<div class="top-in">
+<button class="menu-btn" type="button" aria-controls="side" aria-expanded="false" aria-label="Menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+<a class="brand" href="../"><svg width="28" height="28" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lfn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fde68a"/><stop offset="0.45" stop-color="#fbbf24"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs><path d="M26 12a6 6 0 0 1 12 0" fill="none" stroke="#fbbf24" stroke-width="3.5" stroke-linecap="round"/><rect x="19" y="12" width="26" height="6" rx="3" fill="#fbbf24"/><rect x="16.5" y="19.5" width="31" height="30" rx="9" fill="#1c1c20" stroke="#fbbf24" stroke-width="3"/><path d="M32 25c5 6 7 10 7 14a7 7 0 0 1-14 0c0-4 2-8 7-14z" fill="url(#lfn)"/><rect x="20" y="51" width="24" height="5" rx="2.5" fill="#fbbf24"/></svg><span>Lanternly</span><span class="brand-docs">Docs</span></a>
+<div class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search the docs" autocomplete="off" aria-label="Search the docs"><kbd>/</kbd><div id="results" class="results" role="listbox" hidden></div></div>
+<nav class="top-links" aria-label="Site"><a href="../">Home</a><a href="https://github.com/thiyagarajanshankar13/lanternly">GitHub</a></nav>
+</div>
+</header>
+<div class="wrap">
+<aside id="side" class="side"><nav aria-label="Documentation"><div class="nav-group"><p class="nav-head">Get started</p><ul><li><a href="./">Introduction</a></li><li><a href="quick-start.html">Quick start</a></li><li><a href="install.html">Install on your servers</a></li><li><a href="concepts.html">How it fits together</a></li></ul></div><div class="nav-group"><p class="nav-head">Run things</p><ul><li><a href="servers.html">Servers</a></li><li><a href="github-apps.html">Apps from GitHub</a></li><li><a href="docker-images.html" aria-current="page">Docker images</a></li><li><a href="postgres.html">PostgreSQL</a></li><li><a href="s3-storage.html">S3 storage (MinIO) <span class="pill">soon</span></a></li><li><a href="domains.html">Domains and HTTPS</a></li></ul></div><div class="nav-group"><p class="nav-head">Keep it safe</p><ul><li><a href="backups.html">Backups</a></li><li><a href="monitoring.html">Monitoring</a></li><li><a href="people.html">People and access</a></li><li><a href="security.html">Security</a></li></ul></div><div class="nav-group"><p class="nav-head">Configure</p><ul><li><a href="settings.html">Settings and branding</a></li><li><a href="plugins.html">Plugins</a></li><li><a href="aws.html">Amazon Web Services plugin</a></li><li><a href="configuration.html">Configuration reference</a></li></ul></div><div class="nav-group"><p class="nav-head">Help</p><ul><li><a href="upgrading.html">Upgrading Lanternly</a></li><li><a href="troubleshooting.html">Troubleshooting</a></li><li><a href="contributing.html">Contributing</a></li></ul></div></nav></aside>
+<main id="content" class="content">
+<p class="crumb">Run things</p>
+<article class="doc">
+<h1>Docker images</h1>
+<p class="lead">Run an image someone has already built, such as <code>nginx</code>, <code>redis</code> or <code>louislam/uptime-kuma</code>, with no GitHub repo involved.</p>
+
+<h2 id="add-an-image-service"><a class="anchor" href="#add-an-image-service" aria-hidden="true" tabindex="-1">#</a>Add an image service</h2>
+<ol class="steps">
+<li>Open a project and press <strong>New service → Docker image</strong>.</li>
+<li><strong>Image</strong>: a name and tag such as <code>nginx:1.27</code>, <code>bitnami/redis:7.4</code>, <code>ghcr.io/owner/app:v2</code> or <code>image@sha256:…</code>, or paste the image's link from hub.docker.com. Pick a version tag rather than <code>latest</code> so every restart runs the same thing.</li>
+<li><strong>Name</strong>: other services in the project reach it by this name.</li>
+<li><strong>Private image</strong> (optional): a registry user name and a read-only access token (on Docker Hub: Account settings → Personal access tokens). Don't use your password. The token is stored encrypted and only used for each pull.</li>
+<li><strong>Give it a web address</strong>: leave it ticked for a website. Untick it for things only the project uses, such as a cache or a worker: it then has no address on the internet and isn't monitored.</li>
+<li><strong>Port</strong>: the port the image listens on (its Docker Hub page usually says: 80 for nginx, 6379 for Redis). <strong>Health page</strong>: a page that answers once it's ready, or empty when the image serves no web pages.</li>
+<li><strong>Settings</strong>: the environment variables the image reads. Database links and <code>${{db.VAR}}</code> references work as they do for apps.</li>
+<li>Press <strong>Create service</strong>. The image is pulled and started, usually in under a minute.</li>
+</ol>
+
+<h2 id="pinned-to-a-digest"><a class="anchor" href="#pinned-to-a-digest" aria-hidden="true" tabindex="-1">#</a>Pinned to a digest</h2>
+<p>When an image is pulled, the server runs the exact digest it got and the console records it (<code>Pinned to nginx@sha256:…</code>). A tag that's later moved on Docker Hub doesn't change what's running until you ask for it.</p>
+<ul>
+<li><strong>Pull again</strong> fetches the tag again and starts what it points to now.</li>
+<li><strong>Versions</strong> lists each digest that has run, with <strong>Roll back</strong>.</li>
+<li><strong>Settings</strong> changes the image (pulling and starting the new one), the sign-in, web address, port, health page, memory and settings.</li>
+</ul>
+
+<h2 id="examples"><a class="anchor" href="#examples" aria-hidden="true" tabindex="-1">#</a>Examples</h2>
+<div class="table"><table>
+<tr><th>What</th><th>Image</th><th>Web address</th><th>Port</th><th>Health page</th></tr>
+<tr><td>Static site or proxy</td><td><code>nginx:1.27</code></td><td>yes</td><td>80</td><td><code>/</code></td></tr>
+<tr><td>Cache for your app</td><td><code>redis:7.4</code></td><td>no</td><td>6379</td><td>empty</td></tr>
+<tr><td>Uptime dashboard</td><td><code>louislam/uptime-kuma:1</code></td><td>yes</td><td>3001</td><td><code>/</code></td></tr>
+<tr><td>Background worker from your registry</td><td><code>ghcr.io/acme/worker:2.3.0</code></td><td>no</td><td>any</td><td>empty</td></tr>
+</table></div>
+<p>An app in the same project reaches the Redis above at <code>redis://&lt;name&gt;:6379</code>.</p>
+
+<h2 id="limits"><a class="anchor" href="#limits" aria-hidden="true" tabindex="-1">#</a>Limits</h2>
+<ul>
+<li>No volumes yet: anything the container writes is lost when it restarts or updates. Keep data in a project database.</li>
+<li>The image's own start command is used; there's no override.</li>
+</ul>
+</article>
+<nav class="pager" aria-label="Previous and next page"><a class="prev" href="github-apps.html"><span>Previous</span>Apps from GitHub</a><a class="next" href="postgres.html"><span>Next</span>PostgreSQL</a></nav>
+<p class="edit"><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/gh-pages/docs-src/pages/docker-images.html">Edit this page on GitHub</a></p>
+<footer class="foot"><span>Lanternly · AGPL-3.0</span><a href="https://github.com/thiyagarajanshankar13/lanternly">GitHub</a><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/SECURITY.md">Security policy</a><a href="https://github.com/thiyagarajanshankar13/lanternly/blob/main/CONTRIBUTING.md">Contributing</a></footer>
+</main>
+<nav class="toc" aria-label="On this page"><p class="nav-head">On this page</p><ul><li><a href="#add-an-image-service">Add an image service</a></li><li><a href="#pinned-to-a-digest">Pinned to a digest</a></li><li><a href="#examples">Examples</a></li><li><a href="#limits">Limits</a></li></ul></nav>
+</div>
+<script src="docs.js" defer></script>
+</body>
+</html>
