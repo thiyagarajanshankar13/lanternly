@@ -15,20 +15,20 @@ export const TONE: Record<Club['status'], [string, CanvasTone]> = { creating: ['
 
 export function toNode(c: Club, baseDomain: string, all: Club[], shown: Set<number>, operate: boolean): CanvasNode {
   // Any kind a plugin adds is drawn as a site.
-  const kind = c.kind === 'postgres' ? 'db' : c.kind !== 'app' ? 'site' : c.appImageRef ? 'image' : 'app'
-  const url = c.kind === 'postgres' ? null : clubDomains(c, baseDomain)[0] ?? null
-  const port = c.kind === 'app' ? c.appPort : c.kind === 'postgres' ? 5432 : 3000
-  const uses = c.kind === 'app' ? all.filter((d) => d.kind === 'postgres' && shown.has(d.id) && appsUsing(d.id).some((a) => a.id === c.id)).map((d) => d.id) : []
+  const kind = c.kind === 'postgres' ? 'db' : c.kind === 'minio' ? 's3' : c.kind !== 'app' ? 'site' : c.appImageRef ? 'image' : 'app'
+  const url = c.kind === 'postgres' || (c.kind === 'minio' && !c.appPublic) ? null : clubDomains(c, baseDomain)[0] ?? null
+  const port = c.kind === 'app' ? c.appPort : c.kind === 'postgres' ? 5432 : c.kind === 'minio' ? 9000 : 3000
+  const uses = c.kind === 'app' ? all.filter((d) => (d.kind === 'postgres' || d.kind === 'minio') && shown.has(d.id) && appsUsing(d.id).some((a) => a.id === c.id)).map((d) => d.id) : []
   const tag = /:([^:/@]+)$/.exec(c.image)?.[1]
   const [statusLabel, tone] = TONE[c.status] ?? [c.status, '']
   return {
     id: c.id, name: c.name, displayName: c.displayName, kind,
     kindLabel: kind === 'image' ? 'Docker image' : kind === 'app' ? 'App from GitHub' : kindLabel(c.kind),
     statusLabel, tone, url, inside: `${c.name}:${port}`,
-    source: kind === 'image' ? imageDisplay(c.appImageRef) : kind === 'app' ? `${c.appRepo} @ ${c.appBranch}` : kind === 'db' ? `PostgreSQL ${pgVersionOf(c.image)}` : tag ? `${kindLabel(c.kind).replace(/ site$/, '')} ${tag}` : '',
-    sourceLabel: kind === 'image' ? 'Image' : kind === 'app' ? 'Code' : kind === 'db' ? 'Version' : 'Release',
+    source: kind === 'image' ? imageDisplay(c.appImageRef) : kind === 'app' ? `${c.appRepo} @ ${c.appBranch}` : kind === 'db' ? `PostgreSQL ${pgVersionOf(c.image)}` : kind === 's3' ? `${c.s3Buckets.length} bucket${c.s3Buckets.length === 1 ? '' : 's'}: ${c.s3Buckets.map((b) => b.name).join(', ')}` : tag ? `${kindLabel(c.kind).replace(/ site$/, '')} ${tag}` : '',
+    sourceLabel: kind === 'image' ? 'Image' : kind === 'app' ? 'Code' : kind === 'db' ? 'Version' : kind === 's3' ? 'Buckets' : 'Release',
     memoryMb: c.memoryMb, uses,
-    db: c.kind === 'postgres' ? {
+    db: c.kind === 'postgres' || c.kind === 'minio' ? {
       used: fmtMb(c.pgSizeBytes), quota: `${(c.pgQuotaMb / 1024).toLocaleString('en')} GB`, readOnly: c.pgReadOnly,
       pct: c.pgSizeBytes === null ? null : Math.min(100, Math.round((c.pgSizeBytes / (c.pgQuotaMb * 1024 * 1024)) * 100)),
     } : null,

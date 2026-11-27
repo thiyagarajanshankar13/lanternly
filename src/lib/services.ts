@@ -11,15 +11,25 @@ export function projectOf(club: Pick<Club, 'projectId'>): Project | null {
   return club.projectId ? getProject(club.projectId) : null
 }
 
-/** The services in a project, sorted: sites and apps first, then databases. */
+/** The services in a project, sorted: sites and apps first, then databases, then storage. */
 export function servicesOf(projectId: number): Club[] {
-  const order = (kind: string) => (kind === 'postgres' ? 2 : kind === 'app' ? 1 : 0)
+  const order = (kind: string) => (kind === 'minio' ? 3 : kind === 'postgres' ? 2 : kind === 'app' ? 1 : 0)
   return listClubs().filter((c) => c.projectId === projectId).sort((a, b) => order(a.kind) - order(b.kind) || a.name.localeCompare(b.name))
 }
 
 /** Database names in a project (what ${{name.VAR}} may point at). */
 export function databasesIn(projectId: number): Club[] {
   return servicesOf(projectId).filter((c) => c.kind === 'postgres')
+}
+
+/** S3 storage services in a project. */
+export function storageIn(projectId: number): Club[] {
+  return servicesOf(projectId).filter((c) => c.kind === 'minio')
+}
+
+/** What an app can be connected to in a project: its databases and storage. */
+export function linkableIn(projectId: number): Club[] {
+  return servicesOf(projectId).filter((c) => c.kind === 'postgres' || c.kind === 'minio')
 }
 
 /** The CLUBCTL_ lines every service's settings carry. */
@@ -30,6 +40,11 @@ export function serviceLines(club: Club): string[] {
     for (const link of linksOfApp(club.id)) {
       const target = getClub(link.dbId)
       if (target && target.kind === 'postgres' && target.projectId === club.projectId) lines.push(`CLUBCTL_LINK=${target.name}:${link.prefix}`)
+      // Storage links are their own lines, so servers with an older clubctl see the database links exactly as before.
+      if (target && target.kind === 'minio' && target.projectId === club.projectId) {
+        const bucket = target.s3Buckets.some((b) => b.name === link.bucket) ? link.bucket : ''
+        lines.push(`CLUBCTL_S3_LINK=${target.name}:${link.prefix}:${bucket}`)
+      }
     }
     lines.push(`CLUBCTL_PREDEPLOY_B64=${club.appPredeploy ? Buffer.from(club.appPredeploy, 'utf8').toString('base64') : ''}`)
   }
@@ -38,7 +53,7 @@ export function serviceLines(club: Club): string[] {
 
 export const serviceText = (club: Club) => serviceLines(club).map((l) => `${l}\n`).join('')
 
-/** Running or paused apps connected to a database (they restart when its password or data changes). */
+/** Apps connected to a database or storage (they restart when its password, key or data changes). */
 export function appsUsing(dbId: number): Club[] {
   const db = getClub(dbId)
   const linked = new Set(linksToDb(dbId).map((l) => l.appId))
@@ -47,4 +62,4 @@ export function appsUsing(dbId: number): Club[] {
 
 /** How each kind of service is named on screen. */
 export const kindLabel = (kind: Club['kind']): string =>
-  kind === 'app' ? 'App' : kind === 'postgres' ? 'PostgreSQL' : pluginForKind(kind)?.newService?.title ?? kind
+  kind === 'app' ? 'App' : kind === 'postgres' ? 'PostgreSQL' : kind === 'minio' ? 'S3 storage' : pluginForKind(kind)?.newService?.title ?? kind

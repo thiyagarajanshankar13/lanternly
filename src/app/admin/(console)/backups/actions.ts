@@ -2,6 +2,7 @@
 
 import { getProject, pgVersionOf } from '@/lib/projects'
 import { createDatabase } from '@/lib/postgres/service'
+import { createStorage } from '@/lib/storage/service'
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
@@ -163,6 +164,21 @@ export async function restoreCopyAction(_prev: FormState, form: FormData): Promi
     if ('error' in made) return { error: made.error }
     updateClub(made.club.id, { notes: `Copy of ${backup.clubName} from the backup of ${backup.startedAt.slice(0, 16).replace('T', ' ')} UTC (${backup.ref}).`, backupFrequentHours: 0, backupDaily: false })
     enqueue(made.club, 'restore', admin.email, { backupId: backup.id, copy: true }, batch)
+    await audit(admin, 'restore-copy', { club: made.club, detail: `From backup ${backup.id}` })
+    redirect(`/admin/clubs/${made.club.id}`)
+  }
+  // A storage's copy is a new storage in the same project, inside it only, with the same buckets.
+  if (source?.kind === 'minio') {
+    const batch = newBatch()
+    const project = getProject(source.projectId)
+    if (!project) return { error: "The storage's project is gone." }
+    const made = createStorage(project, { name, displayName: `${source.displayName} (copy)`, bucket: source.s3Buckets[0]?.name, memoryMb: source.memoryMb, quotaMb: source.pgQuotaMb }, admin.email, batch)
+    if ('error' in made) return { error: made.error }
+    updateClub(made.club.id, {
+      s3Buckets: source.s3Buckets.map((b) => ({ name: b.name, public: false, objects: null, bytes: null })),
+      notes: `Copy of ${backup.clubName} from the backup of ${backup.startedAt.slice(0, 16).replace('T', ' ')} UTC (${backup.ref}).`, backupFrequentHours: 0, backupDaily: false,
+    })
+    enqueue(getClub(made.club.id)!, 'restore', admin.email, { backupId: backup.id, copy: true }, batch)
     await audit(admin, 'restore-copy', { club: made.club, detail: `From backup ${backup.id}` })
     redirect(`/admin/clubs/${made.club.id}`)
   }

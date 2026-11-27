@@ -62,12 +62,12 @@ export const pluginMenu = (on: Set<PluginId> = enabledPlugins()) => PLUGINS.filt
 export const servicesLabel = (on: Set<PluginId> = enabledPlugins()): string =>
   PLUGINS.find((p) => on.has(p.id) && p.servicesLabel)?.servicesLabel ?? 'Services'
 
-/** The plugin that adds a service kind, or undefined for a core kind (app, postgres). */
+/** The plugin that adds a service kind, or undefined for a core kind (app, postgres, minio). */
 export const pluginForKind = (kind: string): DeployerPlugin | undefined => PLUGINS.find((p) => p.serviceKinds?.includes(kind))
 
 /** A service made by a plugin that is off (or not installed). Its pages and actions answer "not found". */
 export function hiddenByPlugin(club: { kind: string }, on: Set<PluginId> = enabledPlugins()): boolean {
-  if (club.kind === 'app' || club.kind === 'postgres') return false
+  if (club.kind === 'app' || club.kind === 'postgres' || club.kind === 'minio') return false
   const plugin = pluginForKind(club.kind)
   return !plugin || !on.has(plugin.id)
 }

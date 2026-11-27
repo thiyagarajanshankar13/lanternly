@@ -15,6 +15,47 @@ CLUBCTL_PROJECT=shop-db
 ]
 `;
 
+exports[`what live servers receive > S3 storage service: create, buckets, and an app linked to it (new in clubctl, separate lines) 1`] = `
+[
+  {
+    "args": [
+      "s3-create",
+      "shop-files",
+      "docker.io/chainguard/minio:latest",
+      "-",
+    ],
+    "stdin": "CLUBCTL_MEMORY_MB=256
+CLUBCTL_BUCKET=media:public
+CLUBCTL_PROJECT=shop-files
+",
+  },
+  {
+    "args": [
+      "s3-buckets",
+      "shop-files",
+    ],
+    "stdin": "CLUBCTL_BUCKET=media:public
+CLUBCTL_BUCKET=private:private
+",
+  },
+  {
+    "args": [
+      "app-create",
+      "web",
+      "docker.io/library/nginx:1.27",
+      "web.avro.site",
+    ],
+    "stdin": "CLUBCTL_MEMORY_MB=128
+CLUBCTL_PORT=80
+CLUBCTL_HEALTH_PATH=/
+CLUBCTL_PROJECT=shop-files
+CLUBCTL_S3_LINK=shop-files::media
+CLUBCTL_PREDEPLOY_B64=
+",
+  },
+]
+`;
+
 exports[`what live servers receive > app from a Docker image: create and deploy 1`] = `
 [
   {

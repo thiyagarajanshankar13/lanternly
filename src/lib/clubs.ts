@@ -9,9 +9,13 @@ import { clubNameError } from './validate'
 export type ClubStatus = 'creating' | 'running' | 'paused' | 'failed' | 'removing'
 /**
  * 'app' = an app built from a GitHub repo + branch (or a Docker image); 'postgres' = a PostgreSQL
- * database service; anything else is a plugin's kind (the Avrosphere plugin's is 'avrosphere').
+ * database service; 'minio' = S3 storage (a MinIO server); anything else is a plugin's kind
+ * (the Avrosphere plugin's is 'avrosphere').
  */
-export type SiteKind = 'app' | 'postgres' | (string & {})
+export type SiteKind = 'app' | 'postgres' | 'minio' | (string & {})
+
+/** One bucket of an S3 storage service, with the latest numbers from the server. */
+export type Bucket = { name: string; public: boolean; objects: number | null; bytes: number | null }
 
 export type Club = {
   id: number
@@ -63,7 +67,9 @@ export type Club = {
   projectId: number
   /** 1 = the server has it on its project's network; 0 = still to do; 2 = the server's clubctl is too old. */
   projectSynced: number
-  /** Postgres only: soft disk quota, and the latest numbers from the server. */
+  /** Storage only: its buckets (what the server should have, plus the latest numbers). */
+  s3Buckets: Bucket[]
+  /** Postgres and storage: soft disk quota, and the latest numbers from the server. */
   pgQuotaMb: number
   pgSizeBytes: number | null
   pgConnections: number | null
@@ -86,7 +92,7 @@ type ClubRow = {
   kind: string; app_repo: string; app_branch: string; app_dockerfile: string; app_port: number; app_health_path: string; app_auto_deploy: number
   app_predeploy: string; app_image_ref: string; app_public: number; project_id: number | null; project_synced: number
   pg_quota_mb: number; pg_size_bytes: number | null; pg_connections: number | null; pg_max_connections: number | null; pg_checked_at: string | null
-  pg_read_only: number; pg_alert_level: number
+  pg_read_only: number; pg_alert_level: number; s3_buckets?: string
 }
 
 function toClub(r: ClubRow): Club {
@@ -94,6 +100,8 @@ function toClub(r: ClubRow): Club {
   try { customDomains = JSON.parse(r.custom_domains) } catch { /* keep empty */ }
   let modules: unknown = []
   try { modules = JSON.parse(r.modules) } catch { /* keep empty */ }
+  let buckets: unknown = []
+  try { buckets = JSON.parse(r.s3_buckets || '[]') } catch { /* keep empty */ }
   return {
     id: r.id, name: r.name, displayName: r.display_name, serverId: r.server_id, status: r.status as ClubStatus,
     image: r.image, modules: Array.isArray(modules) ? modules.filter((m): m is string => typeof m === 'string') : [], customDomains,
@@ -107,6 +115,7 @@ function toClub(r: ClubRow): Club {
     appPredeploy: r.app_predeploy ?? '', appImageRef: r.app_image_ref ?? '', appPublic: r.app_public !== 0, projectId: r.project_id ?? 0, projectSynced: r.project_synced ?? 0,
     pgQuotaMb: r.pg_quota_mb ?? 5120, pgSizeBytes: r.pg_size_bytes, pgConnections: r.pg_connections, pgMaxConnections: r.pg_max_connections,
     pgCheckedAt: r.pg_checked_at, pgReadOnly: !!r.pg_read_only, pgAlertLevel: r.pg_alert_level ?? 0,
+    s3Buckets: Array.isArray(buckets) ? buckets.filter((b): b is Bucket => !!b && typeof b.name === 'string').map((b) => ({ name: b.name, public: !!b.public, objects: b.objects ?? null, bytes: b.bytes ?? null })) : [],
   }
 }
 
@@ -124,14 +133,17 @@ export function getClubByName(name: string): Club | null {
 
 type BackupFields = 'backupFrequentHours' | 'backupFrequentKeepDays' | 'backupDaily' | 'backupDailyHour' | 'backupDailyKeepDays' | 'backupAlert'
 type AppFields = 'kind' | 'appRepo' | 'appBranch' | 'appDockerfile' | 'appPort' | 'appHealthPath' | 'appAutoDeploy' | 'appPredeploy' | 'appImageRef' | 'appPublic' | 'pgQuotaMb'
-type ServiceFields = 'projectId' | 'projectSynced' | 'pgSizeBytes' | 'pgConnections' | 'pgMaxConnections' | 'pgCheckedAt' | 'pgReadOnly' | 'pgAlertLevel'
+type ServiceFields = 'projectId' | 'projectSynced' | 'pgSizeBytes' | 'pgConnections' | 'pgMaxConnections' | 'pgCheckedAt' | 'pgReadOnly' | 'pgAlertLevel' | 's3Buckets'
 export const isApp = (c: Pick<Club, 'kind'>) => c.kind === 'app'
 export const isPostgres = (c: Pick<Club, 'kind'>) => c.kind === 'postgres'
+export const isStorage = (c: Pick<Club, 'kind'>) => c.kind === 'minio'
+/** Kinds the core runs itself (the rest come from plugins). */
+export const isCoreKind = (kind: string) => kind === 'app' || kind === 'postgres' || kind === 'minio'
 /** An app run from a ready-made image (Docker Hub…) rather than built from GitHub. */
 export const isImageApp = (c: Pick<Club, 'kind' | 'appImageRef'>) => c.kind === 'app' && !!c.appImageRef
-/** A site with a web address (an Avrosphere site or an app); databases and internal apps have none. */
+/** A site with a web address (an Avrosphere site, an app, storage given one); databases and internal apps have none. */
 export const hasAddress = (c: Pick<Club, 'kind'> & Partial<Pick<Club, 'appPublic'>>) => c.kind !== 'postgres' && c.appPublic !== false
-export function insertClub(c: Omit<Club, 'id' | 'createdAt' | 'updatedAt' | 'pinned' | 'testSite' | BackupFields | AppFields | ServiceFields> & { pinned?: boolean; testSite?: boolean; projectId?: number; createdBy?: string } & Partial<Pick<Club, BackupFields | AppFields>>): Club {
+export function insertClub(c: Omit<Club, 'id' | 'createdAt' | 'updatedAt' | 'pinned' | 'testSite' | BackupFields | AppFields | ServiceFields> & { pinned?: boolean; testSite?: boolean; projectId?: number; createdBy?: string } & Partial<Pick<Club, BackupFields | AppFields | 's3Buckets'>>): Club {
   const t = now()
   // Every service lives in a project; without one it gets its own, named like it.
   const projectId = c.projectId || createProjectRow({ name: freeProjectName(c.name), displayName: c.displayName, serverId: c.serverId, createdBy: c.createdBy ?? '' })
@@ -142,12 +154,13 @@ export function insertClub(c: Omit<Club, 'id' | 'createdAt' | 'updatedAt' | 'pin
     encryptJson(c.secrets), c.extraEnv, c.timezone, c.memoryMb, c.ownerEmail, c.ownerName, c.notes, projectId, t, t)
   const id = Number(info.lastInsertRowid)
   // A plugin's kind (the column's default, 'avrosphere', is from before kinds were plugins).
-  if (c.kind && c.kind !== 'app' && c.kind !== 'postgres') db().prepare('UPDATE clubs SET kind = ? WHERE id = ?').run(c.kind, id)
-  if (c.kind === 'postgres') {
-    // A database keeps its data on the server, so it gets the default backup schedule too.
+  if (c.kind && c.kind !== 'app' && c.kind !== 'postgres' && c.kind !== 'minio') db().prepare('UPDATE clubs SET kind = ? WHERE id = ?').run(c.kind, id)
+  if (c.kind === 'postgres' || c.kind === 'minio') {
+    // A database or storage keeps its data on the server, so it gets the default backup schedule too.
     const d = getSettings()
     updateClub(id, {
-      kind: 'postgres', pgQuotaMb: c.pgQuotaMb ?? 5120,
+      kind: c.kind, pgQuotaMb: c.pgQuotaMb ?? (c.kind === 'minio' ? 10240 : 5120),
+      ...(c.kind === 'minio' ? { appPublic: c.appPublic ?? false, appPort: 9000, s3Buckets: c.s3Buckets ?? [] } : {}),
       backupFrequentHours: c.backupFrequentHours ?? d.backupDefaultFrequentHours, backupFrequentKeepDays: c.backupFrequentKeepDays ?? d.backupDefaultFrequentKeepDays,
       backupDaily: c.backupDaily ?? d.backupDefaultDaily, backupDailyHour: c.backupDailyHour ?? d.backupDefaultDailyHour, backupDailyKeepDays: c.backupDailyKeepDays ?? d.backupDefaultDailyKeepDays,
     })
@@ -194,6 +207,7 @@ export function updateClub(id: number, patch: Partial<Omit<Club, 'id' | 'name' |
   if (patch.pgCheckedAt !== undefined) map.pg_checked_at = patch.pgCheckedAt
   if (patch.pgReadOnly !== undefined) map.pg_read_only = patch.pgReadOnly ? 1 : 0
   if (patch.pgAlertLevel !== undefined) map.pg_alert_level = patch.pgAlertLevel
+  if (patch.s3Buckets !== undefined) map.s3_buckets = JSON.stringify(patch.s3Buckets.map((b) => ({ name: b.name, public: b.public, objects: b.objects, bytes: b.bytes })))
   if (patch.displayName !== undefined) map.display_name = patch.displayName
   if (patch.serverId !== undefined) map.server_id = patch.serverId
   if (patch.status !== undefined) map.status = patch.status
@@ -249,9 +263,9 @@ export function listServers(): ServerRow[] {
 export function getServer(id: number): ServerRow | null {
   return (db().prepare('SELECT * FROM servers WHERE id = ?').get(id) as ServerRow | undefined) ?? null
 }
-/** Sites and apps on a server (databases don't use up a site place). */
+/** Sites and apps on a server (databases and storage don't use up a site place). */
 export function clubCount(serverId: number): number {
-  return (db().prepare("SELECT COUNT(*) AS n FROM clubs WHERE server_id = ? AND kind <> 'postgres'").get(serverId) as { n: number }).n
+  return (db().prepare("SELECT COUNT(*) AS n FROM clubs WHERE server_id = ? AND kind NOT IN ('postgres', 'minio')").get(serverId) as { n: number }).n
 }
 /** Memory limits of every service on a server, MB. */
 export function memoryUsed(serverId: number): number {

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { DatabasePicker } from './DatabasePicker'
 
-type P = { id: number; displayName: string; server: string; databases: { id: number; name: string; displayName: string }[] }
+type P = { id: number; displayName: string; server: string; databases: { id: number; name: string; displayName: string; kind?: string; buckets?: string[] }[] }
 
 /**
  * For a new app: which project it joins (or a new one named after it), the

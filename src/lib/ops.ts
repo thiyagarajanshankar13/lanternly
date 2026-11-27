@@ -1,7 +1,9 @@
 import { db, now } from './db'
 import { decryptJson, encryptJson, randomToken } from './crypto'
 import { clubDomains } from './clubEnv'
-import { deleteClubRow, getClub, getServer, isApp, isPostgres, listClubs, recordClubVersion, updateClub, type Club, type ClubStatus } from './clubs'
+import { deleteClubRow, getClub, getServer, isApp, isPostgres, isStorage, listClubs, recordClubVersion, updateClub, type Club, type ClubStatus } from './clubs'
+import { clearBucketLinks, linksToDb } from './projects'
+import { bucketLines, storageLines } from './storage/service'
 import { loadDump } from './postgres/dumps'
 import { appsUsing, projectOf, serviceText } from './services'
 import type { ServerRow } from './engine'
@@ -16,7 +18,7 @@ import { backupsReady, expireRemovedSite, runBackup, runRestore } from './backup
 // Every change to a site is an "operation": queued here, run one at a time by
 // an in-process worker, with clubctl's output kept as its log.
 
-export type OpKind = 'create' | 'configure' | 'upgrade' | 'pause' | 'resume' | 'remove' | 'backup' | 'restore' | 'site-build' | 'deploy' | 'https' | 'project' | 'rotate'
+export type OpKind = 'create' | 'configure' | 'upgrade' | 'pause' | 'resume' | 'remove' | 'backup' | 'restore' | 'site-build' | 'deploy' | 'https' | 'project' | 'rotate' | 'buckets'
 export type OpStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 
 export type Operation = {
@@ -45,6 +47,8 @@ type Payload = {
   backupKind?: BackupKind; backupId?: number; copy?: boolean
   /** restore of a database: a dump uploaded through the deployer (instead of a backup). */
   uploadPath?: string
+  /** buckets (storage): the whole new list of buckets, or one empty bucket to remove. */
+  buckets?: { name: string; public: boolean }[]; removeBucket?: string
   /** Anything a plugin's service kind needs for its own steps (Avrosphere: the first admin, a website brief). */
   [key: string]: unknown
 }
@@ -56,7 +60,7 @@ const toOp = (r: OpRow): Operation => ({
 
 export const OP_LABELS: Record<OpKind, string> = {
   create: 'Create', configure: 'Apply settings', upgrade: 'Upgrade', pause: 'Pause', resume: 'Resume', remove: 'Remove', backup: 'Back up', restore: 'Restore', 'site-build': 'Build site', deploy: 'Deploy', https: 'Retry HTTPS',
-  project: 'Join project network', rotate: 'New database password',
+  project: 'Join project network', rotate: 'New password or key', buckets: 'Update buckets',
 }
 
 export function enqueue(club: Club, kind: OpKind, createdBy: string, payload: Payload = {}, batch = ''): Operation {
@@ -153,6 +157,7 @@ async function runOne(row: OpRow): Promise<boolean> {
   const domains = clubDomains(club, platform.baseDomain).join(',')
   if (row.kind === 'project') return projectSet(server, club, out)
   if (isPostgres(club)) return runPgOne(row, club, server, payload, out)
+  if (isStorage(club)) return runS3One(row, club, server, payload, domains, out)
   if (isApp(club)) return runAppOne(row, club, server, payload, domains, out)
   const kind = row.kind as OpKind
   let done: ClubStatus | null = null
@@ -367,7 +372,95 @@ async function runPgOne(row: OpRow, club: Club, server: ServerRow, payload: Payl
   return true
 }
 
-/** Apps using a database pick up its new password or data with a restart (Apply settings). */
+/** An S3 storage service: its own MinIO container on its project's network, files kept on the server. */
+async function runS3One(row: OpRow, club: Club, server: ServerRow, payload: Payload, domains: string, out: (chunk: string) => void): Promise<boolean> {
+  const run = runner()
+  const kind = row.kind as OpKind
+  const settings = () => storageLines(club) + serviceText(club)
+  let done: ClubStatus | null = null
+  let result
+  switch (kind) {
+    case 'create':
+      result = await run(server, ['s3-create', club.name, club.image, domains || '-'], settings(), out)
+      if (result.code === 0) {
+        // The image runs as the exact version pulled (its digest), like Docker image apps.
+        const ran = pinnedImage(result.output) || club.image
+        updateClub(club.id, { image: ran }); recordClubVersion(club.id, ran, row.created_by)
+      }
+      done = 'running'
+      break
+    case 'configure':
+      result = await run(server, ['configure', club.name, domains || '-'], settings(), out)
+      break
+    case 'buckets': {
+      if (payload.removeBucket) {
+        result = await run(server, ['s3-bucket-remove', club.name, payload.removeBucket], undefined, out)
+        if (result.code !== 0) return false
+        const fresh = getClub(club.id) ?? club
+        updateClub(club.id, { s3Buckets: fresh.s3Buckets.filter((b) => b.name !== payload.removeBucket) })
+        const pointed = linksToDb(club.id).some((l) => l.bucket === payload.removeBucket)
+        clearBucketLinks(club.id, payload.removeBucket)
+        if (pointed) restartUsers(club, row.created_by, out)
+        return true
+      }
+      const wanted = payload.buckets ?? club.s3Buckets
+      result = await run(server, ['s3-buckets', club.name], bucketLines(wanted), out)
+      if (result.code !== 0) return false
+      const had = new Map((getClub(club.id) ?? club).s3Buckets.map((b) => [b.name, b]))
+      updateClub(club.id, { s3Buckets: wanted.map((b) => ({ name: b.name, public: b.public, objects: had.get(b.name)?.objects ?? null, bytes: had.get(b.name)?.bytes ?? null })) })
+      return true
+    }
+    case 'https':
+      return retryHttps(server, club, out)
+    case 'pause':
+      result = await run(server, ['pause', club.name], undefined, out)
+      done = 'paused'
+      break
+    case 'resume':
+      result = await run(server, ['resume', club.name], undefined, out)
+      done = 'running'
+      break
+    case 'rotate':
+      result = await run(server, ['s3-rotate', club.name], undefined, out)
+      if (result.code === 0) restartUsers(club, row.created_by, out)
+      break
+    case 'backup': {
+      if (!backupsReady()) { out('Backups to a bucket are not set up (Backups page), so there is nowhere to put this one.\n'); return false }
+      const bk = payload.backupKind ?? 'manual'
+      try { await runBackup(club, bk, row.created_by, out) }
+      catch (err) {
+        out(`!! ${(err as Error).message}\n`)
+        if (bk !== 'manual') await backupFinished(club, false, (err as Error).message)
+        return false
+      }
+      await backupFinished(club, true)
+      return true
+    }
+    case 'restore': {
+      const backup = payload.backupId ? getBackup(payload.backupId) : null
+      if (!backup) { out('That backup no longer exists.\n'); return false }
+      await runRestore(club, backup, { copy: !!payload.copy, by: row.created_by }, out)
+      if (payload.copy && club.status !== 'running') updateClub(club.id, { status: 'running' })
+      return true
+    }
+    case 'remove':
+      if (backupsReady() && (club.status === 'running' || club.status === 'paused' || club.status === 'removing')) {
+        try { await runBackup(club, 'final', row.created_by, out, 'Final backup before removing the storage') }
+        catch (err) { out(`!! The final backup to the bucket failed, so the storage was NOT removed: ${(err as Error).message}\n`); return false }
+      }
+      result = await run(server, ['remove', club.name], undefined, out)
+      if (result.code === 0) { expireRemovedSite(club.id); deleteClubRow(club.id); return true }
+      break
+    default:
+      out(`${OP_LABELS[kind] ?? kind} isn't something a storage does.\n`)
+      return false
+  }
+  if (!result || result.code !== 0) return false
+  if (done) updateClub(club.id, { status: done })
+  return true
+}
+
+/** Apps using a database or storage pick up its new password, key or data with a restart (Apply settings). */
 function restartUsers(db: Club, by: string, out: (chunk: string) => void) {
   for (const app of appsUsing(db.id)) {
     if (app.status !== 'running' && app.status !== 'paused') continue

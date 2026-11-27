@@ -1,9 +1,9 @@
 // The project page draws its services as a diagram: one row per lane
-// (on the web, inside the project, databases), lines from an app to the
-// databases it uses. Pure and browser-safe (no Node imports): the server
+// (on the web, inside the project, data), lines from an app to the
+// databases and storage it uses. Pure and browser-safe (no Node imports): the server
 // builds the nodes, the ProjectCanvas client component lays them out.
 
-export type CanvasKind = 'site' | 'app' | 'image' | 'db'
+export type CanvasKind = 'site' | 'app' | 'image' | 'db' | 's3'
 export type CanvasTone = 'ok' | 'warn' | 'bad' | 'info' | ''
 
 export type CanvasNode = {
@@ -22,7 +22,7 @@ export type CanvasNode = {
   source: string
   sourceLabel: string
   memoryMb: number
-  /** Database ids this service uses. */
+  /** Database and storage ids this service uses. */
   uses: number[]
   db: { used: string; quota: string; pct: number | null; readOnly: boolean } | null
   waitingNetwork: boolean
@@ -30,10 +30,13 @@ export type CanvasNode = {
   href: string
 }
 
-export const LANES = ['On the web', 'Inside the project', 'Databases'] as const
+export const LANES = ['On the web', 'Inside the project', 'Data'] as const
+
+/** Databases and storage: the data lane, private-looking nodes. */
+export const isDataKind = (k: CanvasKind) => k === 'db' || k === 's3'
 
 export function laneOf(n: Pick<CanvasNode, 'kind' | 'url'>): 0 | 1 | 2 {
-  if (n.kind === 'db') return 2
+  if (isDataKind(n.kind)) return 2
   return n.url ? 0 : 1
 }
 

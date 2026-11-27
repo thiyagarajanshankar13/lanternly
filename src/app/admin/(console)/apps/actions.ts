@@ -7,7 +7,7 @@ import { audit } from '@/lib/audit'
 import { projectFor, requireOwner, siteFor } from '@/lib/guards'
 import { getClub, getClubByName, getServer, newNameError, insertClub, isApp, isImageApp, pickServer, serverRoomError, updateClub, type Club } from '@/lib/clubs'
 import { createProjectRow, freeProjectName, getProject, linksClash, predeployError, prefixError, refsError, setLinks, type Project } from '@/lib/projects'
-import { databasesIn } from '@/lib/services'
+import { linkableIn } from '@/lib/services'
 import { PG_DEFAULT_MEMORY_MB, createDatabase, databaseError } from '@/lib/postgres/service'
 import { enqueue, hasPendingOperation } from '@/lib/ops'
 import { getSettings, saveSettings } from '@/lib/settings'
@@ -39,17 +39,23 @@ function appFieldsFrom(form: FormData, memoryFallback: number, opts: { healthOpt
   return { port, healthPath, dockerfile, memoryMb, autoDeploy: form.get('appAutoDeploy') === 'on', error }
 }
 
-/** The databases ticked in the form (with their prefixes) and the pre-deploy command, checked against the project. */
-function servicesFrom(form: FormData, projectDbs: Pick<Club, 'id' | 'name'>[], extraEnv: string, newDbName = '') {
-  const ids = new Set(projectDbs.map((d) => d.id))
-  const links = form.getAll('db').map((v) => Number(v)).filter((id) => ids.has(id)).map((dbId) => ({ dbId, prefix: str(form, `prefix-${dbId}`).toUpperCase() }))
+/** The databases and storage ticked in the form (with their prefixes and buckets) and the pre-deploy command, checked against the project. */
+function servicesFrom(form: FormData, linkable: Pick<Club, 'id' | 'name' | 'kind' | 's3Buckets'>[], extraEnv: string, newDbName = '') {
+  const byId = new Map(linkable.map((d) => [d.id, d]))
+  const links = form.getAll('db').map((v) => Number(v)).filter((id) => byId.has(id)).map((dbId) => {
+    const target = byId.get(dbId)!
+    const storage = target.kind === 'minio'
+    const bucket = storage ? str(form, `bucket-${dbId}`) : ''
+    return { dbId, prefix: str(form, `prefix-${dbId}`).toUpperCase(), bucket: storage && target.s3Buckets.some((b) => b.name === bucket) ? bucket : '', storage }
+  })
   const predeploy = str(form, 'appPredeploy')
-  const names = [...projectDbs.map((d) => d.name), ...(newDbName ? [newDbName] : [])]
+  const names = [...linkable.filter((d) => d.kind === 'postgres').map((d) => d.name), ...(newDbName ? [newDbName] : [])]
+  const storageNames = linkable.filter((d) => d.kind === 'minio').map((d) => d.name)
   const error = links.map((l) => prefixError(l.prefix)).find(Boolean)
     ?? linksClash([...links, ...(newDbName ? [{ prefix: '' }] : [])])
-    ?? refsError(extraEnv, names)
+    ?? refsError(extraEnv, names, storageNames)
     ?? predeployError(predeploy)
-  return { links, predeploy, error: error ?? null }
+  return { links: links.map(({ dbId, prefix, bucket }) => ({ dbId, prefix, bucket })), predeploy, error: error ?? null }
 }
 
 export async function createAppAction(_prev: FormState, form: FormData): Promise<FormState> {
@@ -83,7 +89,7 @@ export async function createAppAction(_prev: FormState, form: FormData): Promise
     const dbErr = databaseError({ name: newDbName })
     if (dbErr) return { error: `The new database: ${dbErr}` }
   }
-  const svc = servicesFrom(form, project ? databasesIn(project.id) : [], extraEnv, newDbName)
+  const svc = servicesFrom(form, project ? linkableIn(project.id) : [], extraEnv, newDbName)
   if (svc.error) return { error: svc.error }
 
   // The branch has to exist before anything is created.
@@ -103,7 +109,7 @@ export async function createAppAction(_prev: FormState, form: FormData): Promise
   if (newDbName && project) {
     const made = createDatabase(project, { name: newDbName, displayName: `${displayName} database` }, admin.email)
     if ('error' in made) return { error: `The new database: ${made.error}` }
-    links.push({ dbId: made.club.id, prefix: '' })
+    links.push({ dbId: made.club.id, prefix: '', bucket: '' })
   }
 
   const club = insertClub({
@@ -157,7 +163,7 @@ export async function createImageAppAction(_prev: FormState, form: FormData): Pr
   if (plain.error) return { error: `Settings: ${plain.error}` }
   const secret = mergeSecretEnv({}, String(form.get('secretEnv') ?? ''))
   if (secret.error) return { error: `Secret settings: ${secret.error}` }
-  const svc = servicesFrom(form, project ? databasesIn(project.id) : [], extraEnv)
+  const svc = servicesFrom(form, project ? linkableIn(project.id) : [], extraEnv)
   if (svc.error) return { error: svc.error }
 
   const serverId = Number(str(form, 'serverId'))
@@ -212,7 +218,7 @@ export async function updateAppAction(_prev: FormState, form: FormData): Promise
   if (plain.error) return { error: `Settings: ${plain.error}` }
   const secret = mergeSecretEnv(club.secrets.appSecretEnv ?? {}, String(form.get('secretEnv') ?? ''))
   if (secret.error) return { error: `Secret settings: ${secret.error}` }
-  const svc = servicesFrom(form, databasesIn(club.projectId), extraEnv)
+  const svc = servicesFrom(form, linkableIn(club.projectId), extraEnv)
   if (svc.error) return { error: svc.error }
   if (f.memoryMb > club.memoryMb) {
     const server = getServer(club.serverId)

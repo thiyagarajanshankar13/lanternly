@@ -20,7 +20,7 @@ import { addDomainAction, clubOperationAction, makePrimaryDomainAction, removeCl
 import { appDeployAction, updateAppAction } from '../../apps/actions'
 import { MoveProject } from '@/components/MoveProject'
 import { DatabasePicker } from '@/components/DatabasePicker'
-import { databasesIn, projectOf } from '@/lib/services'
+import { linkableIn, projectOf } from '@/lib/services'
 import { linksOfApp } from '@/lib/projects'
 
 const BUILD: Record<AppBuild['status'], [string, string]> = {
@@ -51,8 +51,10 @@ export function AppView({ club, can }: { club: Club; can: { operate: boolean; ow
   const runningSha = shaOfImage(club.image)
   const secretKeys = Object.keys(club.secrets.appSecretEnv ?? {})
   const project = projectOf(club)
-  const dbs = project ? databasesIn(project.id) : []
-  const links = new Map(linksOfApp(club.id).map((l) => [l.dbId, l.prefix]))
+  const linkable = project ? linkableIn(project.id) : []
+  const dbs = linkable.filter((d) => d.kind === 'postgres')
+  const stores = linkable.filter((d) => d.kind === 'minio')
+  const links = linksOfApp(club.id)
   const img = isImageApp(club)
   const pub = club.appPublic
   const inside = `${club.name}:${club.appPort}`
@@ -79,8 +81,8 @@ export function AppView({ club, can }: { club: Club; can: { operate: boolean; ow
           <div className="field"><label htmlFor="memoryMb">Memory limit (MB)</label><input id="memoryMb" name="memoryMb" type="number" min={64} max={4000} defaultValue={club.memoryMb} /></div>
         </div>
         {!img && <label className="small" style={{ fontWeight: 400, marginBottom: 14 }}><input type="checkbox" name="appAutoDeploy" defaultChecked={club.appAutoDeploy} /> Deploy every push to the branch by itself</label>}
-        <DatabasePicker databases={dbs.map((d) => ({ id: d.id, name: d.name, displayName: d.displayName }))} linked={[...links].map(([dbId, prefix]) => ({ dbId, prefix }))} />
-        <div className="field"><label htmlFor="extraEnv">Settings</label><textarea id="extraEnv" name="extraEnv" defaultValue={club.extraEnv} spellCheck={false} /><div className="help">One KEY=value per line, given to the app as environment variables.{dbs.length ? <> A value can use a database of this project: <span className="mono">{'${{'}{dbs[0].name}.DATABASE_URL{'}}'}</span>.</> : null}</div></div>
+        <DatabasePicker databases={linkable.map((d) => ({ id: d.id, name: d.name, displayName: d.displayName, kind: d.kind, buckets: d.s3Buckets.map((b) => b.name) }))} linked={links.map((l) => ({ dbId: l.dbId, prefix: l.prefix, bucket: l.bucket }))} />
+        <div className="field"><label htmlFor="extraEnv">Settings</label><textarea id="extraEnv" name="extraEnv" defaultValue={club.extraEnv} spellCheck={false} /><div className="help">One KEY=value per line, given to the app as environment variables.{dbs.length ? <> A value can use a database of this project: <span className="mono">{'${{'}{dbs[0].name}.DATABASE_URL{'}}'}</span>.</> : null}{stores.length ? <> Or a storage: <span className="mono">{'${{'}{stores[0].name}.S3_SECRET_ACCESS_KEY{'}}'}</span>.</> : null}</div></div>
         <div className="field"><label htmlFor="appPredeploy">Pre-deploy command (optional)</label><input id="appPredeploy" name="appPredeploy" type="text" defaultValue={club.appPredeploy} maxLength={500} spellCheck={false} placeholder="npm run migrate" />
           <div className="help">Runs once in each new version, with its settings, before it takes over (database migrations). If it fails, the version already running stays.</div></div>
         <div className="field"><label htmlFor="secretEnv">Secret settings</label><textarea id="secretEnv" name="secretEnv" spellCheck={false} autoComplete="off" placeholder={secretKeys.length ? `Saved: ${secretKeys.join(', ')}` : 'SMTP_PASS=…'} />
@@ -206,7 +208,8 @@ export function AppView({ club, can }: { club: Club; can: { operate: boolean; ow
             <dt>Server</dt><dd>{server?.name ?? 'missing'}</dd>
             <dt>Memory</dt><dd>{server && usable ? <LiveClubMemory serverId={server.id} name={club.name} /> : '–'} <span className="muted">(limit {club.memoryMb} MB)</span></dd>
             <dt>Project</dt><dd>{project ? <Link href={`/admin/projects/${project.id}`}>{project.displayName}</Link> : '–'}</dd>
-            <dt>Databases</dt><dd>{links.size ? dbs.filter((d) => links.has(d.id)).map((d, i) => <span key={d.id}>{i ? ', ' : ''}<Link href={`/admin/clubs/${d.id}`}>{d.name}</Link>{links.get(d.id) ? <span className="muted mono small"> {links.get(d.id)}…</span> : null}</span>) : <span className="muted">None connected</span>}</dd>
+            <dt>Databases</dt><dd>{links.some((l) => dbs.some((d) => d.id === l.dbId)) ? dbs.flatMap((d) => links.filter((l) => l.dbId === d.id).map((l) => ({ d, l }))).map(({ d, l }, i) => <span key={d.id}>{i ? ', ' : ''}<Link href={`/admin/clubs/${d.id}`}>{d.name}</Link>{l.prefix ? <span className="muted mono small"> {l.prefix}…</span> : null}</span>) : <span className="muted">None connected</span>}</dd>
+            {stores.length > 0 && <><dt>Storage</dt><dd>{links.some((l) => stores.some((d) => d.id === l.dbId)) ? stores.flatMap((d) => links.filter((l) => l.dbId === d.id).map((l) => ({ d, l }))).map(({ d, l }, i) => <span key={d.id}>{i ? ', ' : ''}<Link href={`/admin/clubs/${d.id}`}>{d.name}</Link><span className="muted mono small"> {l.bucket || d.s3Buckets[0]?.name}{l.prefix ? ` · ${l.prefix}…` : ''}</span></span>) : <span className="muted">None connected</span>}</dd></>}
             {club.appPredeploy && <><dt>Pre-deploy</dt><dd className="mono small">{club.appPredeploy}</dd></>}
             <dt>Settings</dt><dd>{club.extraEnv.trim() ? club.extraEnv.split('\n').filter((l) => l.includes('=') && !l.startsWith('#')).map((l) => l.slice(0, l.indexOf('='))).join(', ') : 'None'}{secretKeys.length ? <span className="muted"> · secret: {secretKeys.join(', ')}</span> : null}</dd>
             <dt>Backups</dt><dd className="muted">{img ? 'Nothing to back up: the image is in its registry and the settings live here. It keeps no files: data belongs in a database.' : 'Nothing to back up: the code is in GitHub, the built versions are kept and the settings live here.'}</dd>

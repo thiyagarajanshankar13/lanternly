@@ -466,6 +466,12 @@ export const MIGRATIONS: string[] = [
   INSERT OR IGNORE INTO settings (key, value)
   SELECT 'costCurrency', 'AUD'
   WHERE EXISTS (SELECT 1 FROM admins) OR EXISTS (SELECT 1 FROM clubs);
+  `,  // 18: S3 storage services (MinIO, kind 'minio'). A storage keeps its buckets
+  // (and their latest numbers) on its row; its size and quota use the pg_* columns
+  // databases use. An app's link to a storage names the bucket it gets as S3_BUCKET.
+  `
+  ALTER TABLE clubs ADD COLUMN s3_buckets TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE service_links ADD COLUMN bucket TEXT NOT NULL DEFAULT '';
   `,
 ]
 

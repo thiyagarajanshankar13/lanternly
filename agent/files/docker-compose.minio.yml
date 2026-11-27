@@ -1,0 +1,41 @@
+# One S3 storage service (MinIO), run by clubctl as compose project
+# <namespace>-<name> from its folder (s3.env and data/ live there).
+#
+# Each storage has its own container and data folder. It is only on its
+# project's network (proj-<project>): apps there reach it as <name>:9000.
+# No port is published; a web address, when it has one, goes through Caddy.
+# The data folder belongs to uid 65532 (clubctl sets it), so the same file
+# works for images that run as root and for ones that run as "nonroot".
+services:
+  app:
+    image: ${IMAGE:?}
+    container_name: ${NAMESPACE:-avrosphere}-${APP_NAME:?}
+    restart: unless-stopped
+    user: "65532:65532"
+    labels:
+      - "${NAMESPACE:-avrosphere}.club=${APP_NAME}"
+      - "${NAMESPACE:-avrosphere}.kind=minio"
+    env_file:
+      - path: ./s3.env
+        format: raw
+    entrypoint: ["minio"]
+    command: ["server", "/data", "--address", ":9000", "--quiet"]
+    volumes:
+      - ./data:/data
+    mem_limit: ${MEMORY_MB:-256}m
+    memswap_limit: ${MEMORY_MB:-256}m
+    cpus: 1
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      project:
+        aliases: ["${APP_NAME}"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  project:
+    name: ${PROJECT_NET:?a storage service needs a project}
+    external: true

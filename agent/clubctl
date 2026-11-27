@@ -36,9 +36,21 @@
 #   clubctl db-upgrade NAME IMAGE       move to another major version by dump and restore, undo on failure
 #   configure (DOMAINS = -) / pause / resume / remove / logs / dump / restore-* work for databases too.
 #
+# S3 storage services (kind "minio": own MinIO container, data in data/, project network,
+# a web address only when it is given one):
+#   clubctl s3-create NAME IMAGE DOMAINS  DOMAINS = - for none; settings on stdin (CLUBCTL_BUCKET=<bucket>:public|private lines)
+#   clubctl s3-buckets NAME             bucket lines on stdin (<bucket>:public|private): makes missing ones, sets who can read
+#   clubctl s3-bucket-remove NAME BUCKET  removes an empty bucket
+#   clubctl s3-stats NAME               size and buckets as JSON
+#   clubctl s3-credentials NAME         the S3_* lines (for "Reveal")
+#   clubctl s3-rotate NAME              new secret key for the apps' key (restart the apps that use it afterwards)
+#   configure / pause / resume / remove / logs / dump / files-* / restore-* work for storage too.
+#
 # Apps in a project get, on top of their settings:
 #   CLUBCTL_LINK=<database>:<PREFIX>   PREFIX + DATABASE_URL, PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE
+#   CLUBCTL_S3_LINK=<storage>:<PREFIX>:<bucket>  PREFIX + S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID… (no PREFIX: also AWS_*)
 #   ${{<database>.<VAR>}} inside a value is replaced by that variable of a database in the same project
+#   (or of a storage: ${{<storage>.S3_SECRET_ACCESS_KEY}})
 #   CLUBCTL_PREDEPLOY_B64=<base64>     a command run once in each new version before it starts
 #
 # Off-site backups (the deployer streams these over SSH and does the storing,
@@ -73,6 +85,7 @@
 #   /opt/avrosphere/base/sites/NAME.caddy
 #   apps: the same folder with .kind (= app), .port, .health and no data/ or secrets.env
 #   databases: .kind (= postgres), secrets.env (PGUSER/PGPASSWORD/PGDATABASE), pg.env, pgdata/
+#   storage: .kind (= minio), secrets.env (MINIO_ROOT_* and the apps' S3 key), s3.env, .buckets, .port (9000), domains, data/
 #   every service: .project (its project, so its network is proj-<project>)
 set -euo pipefail
 umask 077
@@ -106,6 +119,8 @@ if [[ -f "$ROOT/agent.conf" ]]; then
 fi
 FILES="$ROOT/bin/files"
 PG="$NAMESPACE-postgres"
+MC_IMAGE="docker.io/chainguard/minio-client:latest" # the MinIO client, run for a moment to set up users and buckets
+S3_UID=65532 # storage containers run as this user (docker-compose.minio.yml)
 CADDY="$NAMESPACE-caddy"
 LOCKDIR="$ROOT/locks"
 
@@ -126,11 +141,16 @@ container() { echo "$NAMESPACE-$1"; }
 kind_of()   { cat "$(club_dir "$1")/.kind" 2>/dev/null || echo avrosphere; }
 is_app()    { [[ "$(kind_of "$1")" == app ]]; }
 is_pg()     { [[ "$(kind_of "$1")" == postgres ]]; }
-has_site()  { ! is_pg "$1"; } # databases have no web address
+is_s3()     { [[ "$(kind_of "$1")" == minio ]]; }
+is_core()   { is_app "$1" || is_pg "$1" || is_s3 "$1"; } # a kind clubctl runs itself (not a plugin's)
+has_site()  { ! is_pg "$1"; } # databases have no web address (storage has one only when given domains)
 need_avrosphere() { is_app "$1" && die "$1 is an app: it has no database or uploaded files" || true; }
 need_data() { is_app "$1" && die "$1 is an app: it keeps no data here" || true; }
 need_pg()   { is_pg "$1" || die "$1 isn't a database"; }
 valid_pg_image() { [[ "$1" =~ ^postgres:1[0-9]+(\.[0-9]+)?(-[a-z0-9]+)?$ ]]; }
+need_s3()   { is_s3 "$1" || die "$1 isn't S3 storage"; }
+valid_s3_image() { valid_image "$1" && [[ "${1%%[:@]*}" == */minio ]]; } # any registry's MinIO image (…/minio:tag or @sha256)
+valid_bucket() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]]; }
 project_of()  { cat "$(club_dir "$1")/.project" 2>/dev/null || true; }
 project_net() { local p; p="$(project_of "$1")"; [[ -z "$p" ]] || echo "proj-$p"; }
 file_var() { sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -1; } # file_var FILE KEY
@@ -149,13 +169,14 @@ compose() { # compose NAME IMAGE args...
   local dir file=docker-compose.club.yml mem=700 net; dir="$(club_dir "$name")"
   if is_app "$name"; then file=docker-compose.app.yml; mem=256; fi
   if is_pg "$name"; then file=docker-compose.postgres.yml; mem=256; fi
+  if is_s3 "$name"; then file=docker-compose.minio.yml; mem=256; fi
   mem="$(cat "$dir/.memory" 2>/dev/null || echo $mem)"
   net="$(project_net "$name")"
   [[ -z "$net" ]] || ensure_net "$net"
   local rc=0 extra=()
   # Apps and databases have their project's network as their main one, which a
   # container keeps from when it was made: after a project change, make it again.
-  if [[ " $* " == *" up "* ]] && { is_app "$name" || is_pg "$name"; }; then
+  if [[ " $* " == *" up "* ]] && is_core "$name"; then
     local mode; mode="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$(container "$name")" 2>/dev/null || true)"
     [[ -z "$mode" || "$mode" == "${net:-$APPS_NET}" ]] || extra=(--force-recreate)
   fi
@@ -181,7 +202,7 @@ owned_key() { declare -F avrosphere_owned_key >/dev/null && avrosphere_owned_key
 
 cmd_create()  { need_kind avrosphere; avrosphere_create "$@"; }
 cmd_upgrade() { need_kind avrosphere; avrosphere_upgrade "$@"; }
-cmd_secrets() { need_kind avrosphere; avrosphere_secrets "$@"; }
+cmd_secrets() { if is_core "$1"; then need_club "$1"; need_data "$1"; return 0; fi; need_kind avrosphere; avrosphere_secrets "$@"; } # databases and storage keep their own keys
 
 # ── Project networks ──────────────────────────────────────────────────────────
 on_net() { [[ "$(docker inspect -f "{{if index .NetworkSettings.Networks \"$2\"}}yes{{end}}" "$1" 2>/dev/null)" == yes ]]; }
@@ -231,7 +252,7 @@ take_project() { # take_project DIR: CLUBCTL_PROJECT from the last read_settings
   echo "$p" > "$1/.project"
 }
 
-take_app_links() { # take_app_links DIR: CLUBCTL_LINK lines and the pre-deploy command
+take_app_links() { # take_app_links DIR: CLUBCTL_LINK / CLUBCTL_S3_LINK lines and the pre-deploy command
   local dir="$1" l cmd
   grep -q '^CLUBCTL_PREDEPLOY_B64=' "$dir/.clubctl.new" 2>/dev/null || return 0 # an older deployer: keep what's there
   : > "$dir/.links.new"
@@ -240,6 +261,12 @@ take_app_links() { # take_app_links DIR: CLUBCTL_LINK lines and the pre-deploy c
     echo "$l" >> "$dir/.links.new"
   done < <(sed -n 's/^CLUBCTL_LINK=//p' "$dir/.clubctl.new")
   mv "$dir/.links.new" "$dir/.links"
+  : > "$dir/.s3links.new"
+  while IFS= read -r l; do
+    [[ "$l" =~ ^[a-z][a-z0-9-]{1,30}:([A-Z][A-Z0-9_]*_)?:([a-z0-9][a-z0-9-]{1,61}[a-z0-9])?$ ]] || die "bad storage link: ${l:0:60}"
+    echo "$l" >> "$dir/.s3links.new"
+  done < <(sed -n 's/^CLUBCTL_S3_LINK=//p' "$dir/.clubctl.new")
+  if [[ -s "$dir/.s3links.new" ]]; then mv "$dir/.s3links.new" "$dir/.s3links"; else rm -f "$dir/.s3links.new" "$dir/.s3links"; fi
   cmd="$(clubctl_var "$dir" CLUBCTL_PREDEPLOY_B64)"
   if [[ -z "$cmd" ]]; then rm -f "$dir/.predeploy"; return 0; fi
   [[ "$cmd" =~ ^[A-Za-z0-9+/=]+$ ]] || die "bad pre-deploy command"
@@ -268,14 +295,22 @@ same_project_db() { # same_project_db SERVICE DB: DB is a database in SERVICE's 
   local p; p="$(project_of "$1")"
   [[ -n "$p" && -d "$(club_dir "$2")" ]] && is_pg "$2" && [[ "$(project_of "$2")" == "$p" ]]
 }
-resolve_refs() { # resolve_refs NAME < settings: ${{db.VAR}} → its value
-  local name="$1" line full db var
-  local re='\$\{\{[[:space:]]*([a-z][a-z0-9-]*)\.([A-Z_]+)[[:space:]]*\}\}'
+same_project_s3() { # same_project_s3 SERVICE STORAGE: STORAGE is S3 storage in SERVICE's project
+  local p; p="$(project_of "$1")"
+  [[ -n "$p" && -d "$(club_dir "$2")" ]] && is_s3 "$2" && [[ "$(project_of "$2")" == "$p" ]]
+}
+resolve_refs() { # resolve_refs NAME < settings: ${{db.VAR}} (or ${{storage.VAR}}) → its value
+  local name="$1" line full db var value
+  local re='\$\{\{[[:space:]]*([a-z][a-z0-9-]*)\.([A-Z0-9_]+)[[:space:]]*\}\}'
   while IFS= read -r line || [[ -n "$line" ]]; do
     while [[ "$line" =~ $re ]]; do
       full="${BASH_REMATCH[0]}"; db="${BASH_REMATCH[1]}"; var="${BASH_REMATCH[2]}"
-      same_project_db "$name" "$db" || die "\${{$db.$var}}: there is no database $db in this service's project"
-      line="${line//"$full"/$(db_var "$db" "$var")}"
+      if same_project_s3 "$name" "$db"; then value="$(s3_var "$db" "$var" "")" || exit 1
+      else
+        same_project_db "$name" "$db" || die "\${{$db.$var}}: there is no database or storage $db in this service's project"
+        value="$(db_var "$db" "$var")" || exit 1
+      fi
+      line="${line//"$full"/$value}"
     done
     printf '%s\n' "$line"
   done
@@ -289,6 +324,16 @@ link_vars() { # link_vars NAME: the variables of every database the app is conne
     same_project_db "$name" "$db" || die "$name is connected to $db, which isn't a database in its project"
     db_vars "$db" "$prefix"
   done < "$(club_dir "$name")/.links"
+}
+s3_link_vars() { # s3_link_vars NAME: the variables of every storage the app is connected to
+  local name="$1" l s3 rest prefix bucket
+  [[ -f "$(club_dir "$name")/.s3links" ]] || return 0
+  while IFS= read -r l; do
+    [[ -n "$l" ]] || continue
+    s3="${l%%:*}"; rest="${l#*:}"; prefix="${rest%%:*}"; bucket="${rest#*:}"
+    same_project_s3 "$name" "$s3" || die "$name is connected to $s3, which isn't storage in its project"
+    s3_vars "$s3" "$prefix" "$bucket"
+  done < "$(club_dir "$name")/.s3links"
 }
 
 run_predeploy() { # run_predeploy NAME IMAGE: the app's pre-deploy command, in the new image, before it starts
@@ -306,6 +351,10 @@ run_predeploy() { # run_predeploy NAME IMAGE: the app's pre-deploy command, in t
 }
 
 healthy() {
+  if is_s3 "$1"; then
+    docker exec "$CADDY" wget -q -T 5 -O /dev/null "http://$(container "$1"):9000/minio/health/live" 2>/dev/null
+    return
+  fi
   if is_pg "$1"; then
     local dir; dir="$(club_dir "$1")"
     docker exec "$(container "$1")" pg_isready -q -U "$(file_var "$dir/secrets.env" PGUSER)" -d "$(file_var "$dir/secrets.env" PGDATABASE)" 2>/dev/null
@@ -330,7 +379,7 @@ healthy() {
   avrosphere_healthy "$1"
 }
 # Clubs get 4 minutes (first boot runs Next.js warm-up), apps 2.
-wait_healthy() { local i n=80; { is_app "$1" || is_pg "$1"; } && n=40; for i in $(seq 1 $n); do healthy "$1" && return 0; sleep 3; done; return 1; }
+wait_healthy() { local i n=80; is_core "$1" && n=40; for i in $(seq 1 $n); do healthy "$1" && return 0; sleep 3; done; return 1; }
 
 ensure_apps_net() { # apps get their own network: Caddy is on it, Postgres and the clubs aren't
   docker network inspect "$APPS_NET" >/dev/null 2>&1 || docker network create "$APPS_NET" >/dev/null
@@ -408,13 +457,17 @@ setting() { sed -n "s/^$2=//p" "$1/settings.env" | tail -1; }
 
 write_app_env() { # secrets + fixed paths + the deployer's settings → app.env
   local dir="$1" name; name="$(basename "$dir")"
+  if [[ "$(cat "$dir/.kind" 2>/dev/null)" == minio ]]; then
+    { echo "MINIO_ROOT_USER=$(file_var "$dir/secrets.env" MINIO_ROOT_USER)"; echo "MINIO_ROOT_PASSWORD=$(file_var "$dir/secrets.env" MINIO_ROOT_PASSWORD)"; echo "MINIO_BROWSER=off"; } > "$dir/s3.env"
+    return
+  fi
   if [[ "$(cat "$dir/.kind" 2>/dev/null)" == postgres ]]; then
     { echo "POSTGRES_USER=$(file_var "$dir/secrets.env" PGUSER)"; echo "POSTGRES_PASSWORD=$(file_var "$dir/secrets.env" PGPASSWORD)"; echo "POSTGRES_DB=$(file_var "$dir/secrets.env" PGDATABASE)"; } > "$dir/pg.env"
     return
   fi
   if [[ "$(cat "$dir/.kind" 2>/dev/null)" == app ]]; then
     # Database values are filled in here, so passwords never leave this server.
-    local body; body="$(resolve_refs "$name" < "$dir/settings.env"; link_vars "$name")" || exit 1
+    local body; body="$(resolve_refs "$name" < "$dir/settings.env"; link_vars "$name"; s3_link_vars "$name")" || exit 1
     { echo "PORT=$(cat "$dir/.port")"; printf '%s\n' "$body"; } | grep -v '^$' > "$dir/app.env"
     return
   fi
@@ -424,8 +477,8 @@ write_app_env() { # secrets + fixed paths + the deployer's settings → app.env
 
 write_domains() { # write_domains NAME "a.example,b.example"
   local name="$1" list="$2" d dir; dir="$(club_dir "$name")"
-  # An app with no web address ("-") is only reachable inside its project.
-  if [[ "$list" == - ]] && is_app "$name"; then : > "$dir/domains"; return; fi
+  # An app or storage with no web address ("-") is only reachable inside its project.
+  if [[ "$list" == - ]] && { is_app "$name" || is_s3 "$name"; }; then : > "$dir/domains"; return; fi
   local -a ds; IFS=',' read -r -a ds <<< "$list"
   (( ${#ds[@]} >= 1 && ${#ds[@]} <= 10 )) || die "give 1 to 10 domains"
   for d in "${ds[@]}"; do
@@ -534,7 +587,7 @@ cleanup_failed_create() { # EXIT trap while a create is under way
   [[ -z "${CLUBCTL_KEEP_FAILED:-}" ]] || { echo "clubctl: create failed (kept for inspection)" >&2; exit 1; }
   echo "clubctl: create failed, cleaning up" >&2
   docker rm -f "$(container "$name")" >/dev/null 2>&1 || true
-  if ! is_app "$name" && ! is_pg "$name"; then
+  if ! is_core "$name"; then
     psql -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)" >/dev/null 2>&1 || true
     psql -c "DROP ROLE IF EXISTS \"$db\"" >/dev/null 2>&1 || true
   fi
@@ -546,6 +599,7 @@ cleanup_failed_create() { # EXIT trap while a create is under way
 cmd_configure() {
   local name="$1" domains="$2"; need_club "$name"
   if is_pg "$name"; then pg_configure "$name"; return; fi
+  if is_s3 "$name"; then s3_configure "$name" "$domains"; return; fi
   with_lock "$name"
   local dir; dir="$(club_dir "$name")"
   cp "$dir/settings.env" "$dir/settings.env.bak"; cp "$dir/domains" "$dir/domains.bak"
@@ -603,6 +657,7 @@ cmd_resume() {
 
 cmd_backup() {
   local name="$1"; need_club "$name"; need_data "$name"
+  is_s3 "$name" && die "storage is backed up to the deployer's bucket (set up backups on its Backups page)"
   mkdir -p "$ROOT/backups"
   local file; file="$ROOT/backups/$(db_name "$name")-$(date -u +%Y%m%d-%H%M%S).sql.gz"
   if is_pg "$name"; then file="${file%.sql.gz}.dump"; pg_dump_custom "$name" > "$file"
@@ -622,6 +677,20 @@ cmd_remove() {
     rm -rf "$dir"
     cleanup_nets
     log "Removed database $name (final copy kept in $keep)"
+    return
+  fi
+  if is_s3 "$name"; then
+    # The files are moved aside, not copied (they can be large): nothing is deleted here.
+    log "Keeping the files in $keep"
+    compose "$name" "$(cat "$dir/.image")" down --remove-orphans >/dev/null 2>&1 || docker rm -f "$(container "$name")" >/dev/null 2>&1 || true
+    mv "$dir/data" "$keep/data"
+    cp "$dir/.buckets" "$dir/domains" "$dir/.image" "$keep/" 2>/dev/null || true
+    rm -f "$ROOT/base/sites/$name.caddy"
+    [[ -n "$(ls -A "$ROOT/base/sites")" ]] || echo "# placeholder" > "$ROOT/base/sites/_empty.caddy"
+    caddy_reload
+    rm -rf "$dir"
+    cleanup_nets
+    log "Removed storage $name (its files are kept in $keep; delete that folder to free the space)"
     return
   fi
   if is_app "$name"; then
@@ -677,6 +746,7 @@ pg_dump_custom() { # a database service's dump, custom format, to stdout
 cmd_dump() {
   local name="$1"; need_club "$name"; need_data "$name"
   if is_pg "$name"; then pg_dump_custom "$name"; return; fi
+  if is_s3 "$name"; then s3_manifest "$name"; return; fi # storage: its files come through files-index / files-pack
   # Custom format: compressed, and pg_restore can load it as the club's own role.
   docker exec "$PG" pg_dump -U postgres -Fc -Z 6 --no-owner --no-acl "$(db_name "$name")" </dev/null
 }
@@ -689,7 +759,12 @@ cmd_files_index() {
   local dir cache list joined; dir="$(club_dir "$name")"; cache="$dir/.files-index"
   list="$(mktemp)"; joined="$(mktemp)"
   touch "$cache"
-  ( cd "$dir/data" && find . -path ./backups -prune -o -type f ! -name $'*\n*' ! -name $'*\t*' -printf '%P\t%s\t%T@\n' ) | sort > "$list"
+  if is_s3 "$name"; then
+    # Everything MinIO keeps (objects and its own .minio.sys), except its scratch folders.
+    ( cd "$dir/data" && find . \( -path ./.minio.sys/tmp -o -path ./.minio.sys/multipart -o -path ./.minio.sys/buckets/.usage-cache.bin -o -path ./.minio.sys/buckets/.bloomcycle.bin \) -prune -o -type f ! -name $'*\n*' ! -name $'*\t*' -printf '%P\t%s\t%T@\n' ) | sort > "$list"
+  else
+    ( cd "$dir/data" && find . -path ./backups -prune -o -type f ! -name $'*\n*' ! -name $'*\t*' -printf '%P\t%s\t%T@\n' ) | sort > "$list"
+  fi
   awk -F'\t' 'FILENAME == ARGV[1] { c[$1 "\t" $2 "\t" $3] = $4; next } { k = $1 "\t" $2 "\t" $3; print k "\t" ((k in c) ? c[k] : "-") }' "$cache" "$list" > "$joined"
   local p s m h
   : > "$cache.new"
@@ -725,6 +800,7 @@ read_exact() { # read_exact SIZE FILE  (exactly SIZE bytes of stdin)
 cmd_restore_stage() {
   local name="$1"; need_club "$name"; need_data "$name"
   if is_pg "$name"; then pg_restore_stage "$name"; return; fi
+  if is_s3 "$name"; then s3_restore_stage "$name"; return; fi
   with_lock "$name"
   local dir stage db line rest size p sha src; dir="$(club_dir "$name")"; stage="$dir/.restore"; db="$(db_name "$name")"
   rm -rf "$stage"; mkdir -p "$stage/data"
@@ -769,6 +845,7 @@ cmd_restore_abort() {
   local name="$1"; need_club "$name"; with_lock "$name"
   local dir db; dir="$(club_dir "$name")"; db="$(db_name "$name")"
   if is_pg "$name"; then pg_psql "$name" -c "DROP DATABASE IF EXISTS \"${db}__restore\" WITH (FORCE)" || true; rm -rf "$dir/.restore"; log "Threw away the staged backup of $name"; return; fi
+  if is_s3 "$name"; then rm -rf "$dir/.restore"; log "Threw away the staged backup of $name"; return; fi
   psql -c "DROP DATABASE IF EXISTS \"${db}__restore\" WITH (FORCE)" || true
   rm -rf "$dir/.restore"
   log "Threw away the staged backup of $name"
@@ -786,6 +863,7 @@ swap_secret() { # swap_secret SECRETS_FILE NEW_LINES_FILE
 cmd_restore_apply() {
   local name="$1" image="$2" mode="${3:-}"; need_club "$name"; need_data "$name"; valid_image "$image" || die "bad image: $image"
   if is_pg "$name"; then pg_restore_apply "$name"; return; fi
+  if is_s3 "$name"; then s3_restore_apply "$name" "$image"; return; fi
   [[ -z "$mode" || "$mode" == copy ]] || die "bad mode: $mode"
   with_lock "$name"
   local dir stage db state previous stamp; dir="$(club_dir "$name")"; stage="$dir/.restore"; db="$(db_name "$name")"
@@ -1127,13 +1205,278 @@ cmd_db_upgrade() {
   log "$name now runs $image"
 }
 
+# ── S3 storage services (MinIO) ───────────────────────────────────────────────
+# Each one is its own MinIO server. Its root user stays on this VM; apps get a
+# second key (S3_ACCESS_KEY / S3_SECRET_KEY in secrets.env) with read and write
+# on every bucket of that storage. Users and buckets are made with the MinIO
+# client (MC_IMAGE), run for a moment on the storage's project network.
+
+mc_run() { # mc_run NAME args...: the MinIO client signed in as the storage's root user (alias s3)
+  local name="$1"; shift
+  local dir env rc=0; dir="$(club_dir "$name")"; env="$(mktemp)"
+  printf 'MC_HOST_s3=http://%s:%s@%s:9000\n' "$(file_var "$dir/secrets.env" MINIO_ROOT_USER)" "$(file_var "$dir/secrets.env" MINIO_ROOT_PASSWORD)" "$(container "$name")" > "$env"
+  docker run --rm --network "$(project_net "$name")" --env-file "$env" --memory 128m --security-opt no-new-privileges:true \
+    --entrypoint mc "$MC_IMAGE" --config-dir /tmp/.mc --quiet --no-color "$@" </dev/null || rc=$?
+  rm -f "$env"
+  return $rc
+}
+
+take_buckets() { # take_buckets DIR: CLUBCTL_BUCKET lines from the last read_settings → .buckets (when there are any)
+  local dir="$1" l b mode
+  grep -q '^CLUBCTL_BUCKET=' "$dir/.clubctl.new" 2>/dev/null || return 0
+  : > "$dir/.buckets.new"
+  while IFS= read -r l; do
+    b="${l%%:*}"; mode="${l#*:}"
+    valid_bucket "$b" && [[ "$mode" == public || "$mode" == private ]] || die "bad bucket line: ${l:0:70}"
+    printf '%s\t%s\n' "$b" "$mode" >> "$dir/.buckets.new"
+  done < <(sed -n 's/^CLUBCTL_BUCKET=//p' "$dir/.clubctl.new")
+  mv "$dir/.buckets.new" "$dir/.buckets"
+}
+
+s3_apply_buckets() { # s3_apply_buckets NAME: every bucket in .buckets exists, with its read setting
+  local name="$1" b mode out
+  [[ -f "$(club_dir "$name")/.buckets" ]] || return 0
+  while IFS=$'\t' read -r b mode; do
+    [[ -n "$b" ]] || continue
+    mc_run "$name" mb --ignore-existing "s3/$b" >/dev/null || die "couldn't make the bucket $b"
+    if [[ "$mode" == public ]]; then out="download"; else out="none"; fi
+    mc_run "$name" anonymous set "$out" "s3/$b" >/dev/null || die "couldn't set who can read $b"
+  done < "$(club_dir "$name")/.buckets"
+}
+
+s3_setup() { # s3_setup NAME: the apps' key (made or given its current secret) and the buckets
+  local name="$1" dir key secret out; dir="$(club_dir "$name")"
+  key="$(file_var "$dir/secrets.env" S3_ACCESS_KEY)"; secret="$(file_var "$dir/secrets.env" S3_SECRET_KEY)"
+  log "Setting up the apps' key and the buckets"
+  mc_run "$name" admin user add s3 "$key" "$secret" >/dev/null || die "couldn't make the apps' key (can this VM pull $MC_IMAGE?)"
+  out="$(mc_run "$name" admin policy attach s3 readwrite --user "$key" 2>&1)" || [[ "$out" == *already* ]] || { echo "$out" >&2; die "couldn't give the apps' key read and write"; }
+  s3_apply_buckets "$name"
+}
+
+s3_var() { # s3_var STORAGE VAR [BUCKET]: one variable an app gets from a storage
+  local d first; d="$(club_dir "$1")"
+  case "$2" in
+    S3_ENDPOINT) echo "http://$1:9000" ;;
+    S3_PUBLIC_URL) first="$(head -1 "$d/domains" 2>/dev/null)"; [[ -n "$first" ]] && echo "https://$first" || echo "http://$1:9000" ;;
+    S3_REGION) echo us-east-1 ;;
+    S3_BUCKET) [[ -n "${3:-}" ]] && echo "$3" || cut -f1 "$d/.buckets" 2>/dev/null | head -1 ;;
+    S3_ACCESS_KEY_ID) file_var "$d/secrets.env" S3_ACCESS_KEY ;;
+    S3_SECRET_ACCESS_KEY) file_var "$d/secrets.env" S3_SECRET_KEY ;;
+    S3_FORCE_PATH_STYLE) echo true ;;
+    *) die "a storage has no $2" ;;
+  esac
+}
+s3_vars() { # s3_vars STORAGE PREFIX BUCKET: every variable, prefixed; with no prefix also the names AWS SDKs read
+  local v
+  for v in S3_ENDPOINT S3_PUBLIC_URL S3_REGION S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_FORCE_PATH_STYLE; do echo "$2$v=$(s3_var "$1" "$v" "$3")"; done
+  if [[ -z "$2" ]]; then
+    echo "AWS_ACCESS_KEY_ID=$(s3_var "$1" S3_ACCESS_KEY_ID)"
+    echo "AWS_SECRET_ACCESS_KEY=$(s3_var "$1" S3_SECRET_ACCESS_KEY)"
+    echo "AWS_REGION=us-east-1"
+    echo "AWS_DEFAULT_REGION=us-east-1"
+    echo "AWS_ENDPOINT_URL_S3=http://$1:9000"
+  fi
+}
+
+s3_take_memory() { # s3_take_memory DIR [default]
+  local mem; mem="$(clubctl_var "$1" CLUBCTL_MEMORY_MB)"
+  [[ -n "$mem" || -z "${2:-}" ]] || mem="$2"
+  [[ -z "$mem" ]] && return 0
+  [[ "$mem" =~ ^[0-9]{3,5}$ ]] || die "CLUBCTL_MEMORY_MB must be a number of MB"
+  echo "$mem" > "$1/.memory"
+}
+
+cmd_s3_create() {
+  local name="$1" image="$2" domains="$3"
+  need_name "$name"; valid_s3_image "$image" || die "pick a MinIO image, not $image"
+  local dir; dir="$(club_dir "$name")"
+  [[ ! -e "$dir" ]] || die "site already exists: $name"
+  with_lock "$name"
+  mkdir -p "$dir/data"
+  CREATING="$name"; trap cleanup_failed_create EXIT
+  echo minio > "$dir/.kind"
+  read_settings "$dir" app
+  take_project "$dir"
+  [[ -n "$(project_of "$name")" ]] || die "storage needs a project (CLUBCTL_PROJECT)"
+  s3_take_memory "$dir" 256
+  take_buckets "$dir"
+  [[ -f "$dir/.buckets" ]] || : > "$dir/.buckets"
+  rm -f "$dir/.clubctl.new" "$dir/settings.env"
+  echo 9000 > "$dir/.port"
+  write_domains "$name" "$domains"
+  {
+    echo "MINIO_ROOT_USER=root$(openssl rand -hex 6)"; echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)"
+    echo "S3_ACCESS_KEY=$name-app"; echo "S3_SECRET_KEY=$(openssl rand -hex 24)"
+  } > "$dir/secrets.env"
+  write_app_env "$dir"
+  chown "$S3_UID:$S3_UID" "$dir/data"
+  image="$(pull_app_image "$image" "" "")" || exit 1
+  log "Starting MinIO $name on network $(project_net "$name")"
+  compose "$name" "$image" up -d --remove-orphans
+  wait_healthy "$name" || { docker logs --tail 60 "$(container "$name")" >&2 || true; die "the storage didn't start within 2 minutes"; }
+  s3_setup "$name"
+  echo "$image" > "$dir/.image"; echo running > "$dir/.state"
+  write_site "$name" running
+  trap - EXIT
+  if [[ -s "$dir/domains" ]]; then log "Created storage $name (inside project $(project_of "$name") at http://$name:9000, on the web at https://$(head -1 "$dir/domains"))"
+  else log "Created storage $name (apps in project $(project_of "$name") reach it at http://$name:9000)"; fi
+}
+
+s3_configure() { # memory, buckets, web address or project changed: recreate the container (the files stay)
+  local name="$1" domains="$2" dir; dir="$(club_dir "$name")"
+  with_lock "$name"
+  cp "$dir/domains" "$dir/domains.bak"
+  read_settings "$dir" app
+  take_project "$dir"
+  s3_take_memory "$dir"
+  take_buckets "$dir"
+  rm -f "$dir/.clubctl.new" "$dir/settings.env"
+  write_domains "$name" "$domains"
+  write_app_env "$dir"
+  if [[ "$(cat "$dir/.state")" == running ]]; then
+    log "Restarting $name with the new settings"
+    compose "$name" "$(cat "$dir/.image")" up -d --force-recreate --remove-orphans
+    if ! wait_healthy "$name"; then
+      docker logs --tail 60 "$(container "$name")" >&2 || true
+      mv "$dir/domains.bak" "$dir/domains"
+      die "$name didn't start again"
+    fi
+    s3_apply_buckets "$name"
+  fi
+  rm -f "$dir/domains.bak"
+  write_site "$name" "$(cat "$dir/.state")"
+  log "Configured $name"
+}
+
+cmd_s3_buckets() {
+  local name="$1"; need_club "$name"; need_s3 "$name"; with_lock "$name"
+  local dir l; dir="$(club_dir "$name")"
+  : > "$dir/.clubctl.new"
+  while IFS= read -r l || [[ -n "$l" ]]; do [[ -n "$l" ]] && echo "CLUBCTL_BUCKET=$l" >> "$dir/.clubctl.new"; done
+  take_buckets "$dir"; rm -f "$dir/.clubctl.new"
+  healthy "$name" || die "$name isn't running, so its buckets can't be changed now"
+  s3_apply_buckets "$name"
+  log "Buckets of $name: $(cut -f1 "$dir/.buckets" | paste -sd, | sed 's/,/, /g')"
+}
+
+cmd_s3_bucket_remove() {
+  local name="$1" bucket="$2"; need_club "$name"; need_s3 "$name"; valid_bucket "$bucket" || die "bad bucket name: $bucket"
+  with_lock "$name"
+  local dir; dir="$(club_dir "$name")"
+  healthy "$name" || die "$name isn't running, so the bucket can't be removed now"
+  # rb refuses a bucket that still has files; one that is already gone just leaves the list.
+  if ! mc_run "$name" rb "s3/$bucket" >/dev/null 2>&1; then
+    [[ ! -d "$dir/data/$bucket" ]] || die "the bucket $bucket isn't empty: delete its files first"
+  fi
+  awk -F'\t' -v b="$bucket" '$1 != b' "$dir/.buckets" > "$dir/.buckets.new"; mv "$dir/.buckets.new" "$dir/.buckets"
+  log "Removed the bucket $bucket"
+}
+
+cmd_s3_stats() {
+  local name="$1"; need_club "$name"; need_s3 "$name"
+  local dir running=false bytes=0 b mode n sz sep=""; dir="$(club_dir "$name")"
+  healthy "$name" && running=true
+  bytes="$(du -sb "$dir/data" 2>/dev/null | cut -f1)"
+  printf '{"running":%s,"bytes":%s,"buckets":[' "$running" "${bytes:-0}"
+  while IFS=$'\t' read -r b mode; do
+    [[ -n "$b" ]] || continue
+    n=0; sz=0
+    if [[ -d "$dir/data/$b" ]]; then
+      n="$(find "$dir/data/$b" -name xl.meta -type f 2>/dev/null | wc -l)"
+      sz="$(du -sb "$dir/data/$b" 2>/dev/null | cut -f1)"
+    fi
+    printf '%s{"name":"%s","objects":%s,"bytes":%s,"public":%s}' "$sep" "$b" "${n:-0}" "${sz:-0}" "$([[ "$mode" == public ]] && echo true || echo false)"
+    sep=","
+  done < <(cat "$dir/.buckets" 2>/dev/null)
+  printf ']}\n'
+}
+
+cmd_s3_credentials() {
+  local name="$1"; need_club "$name"; need_s3 "$name"
+  s3_vars "$name" "" ""
+}
+
+cmd_s3_rotate() {
+  local name="$1"; need_club "$name"; need_s3 "$name"; with_lock "$name"
+  local dir key secret; dir="$(club_dir "$name")"; key="$(file_var "$dir/secrets.env" S3_ACCESS_KEY)"; secret="$(openssl rand -hex 24)"
+  healthy "$name" || die "$name isn't running, so its key can't be changed now"
+  mc_run "$name" admin user add s3 "$key" "$secret" >/dev/null || die "MinIO didn't take the new secret key"
+  sed -i "s/^S3_SECRET_KEY=.*/S3_SECRET_KEY=$secret/" "$dir/secrets.env"
+  log "New secret key for $name (restart the apps that use it)"
+}
+
+s3_manifest() { # what "dump" gives for storage: its buckets, as JSON (the files come separately)
+  local dir b mode sep=""; dir="$(club_dir "$1")"
+  printf '{"kind":"minio","name":"%s","buckets":[' "$1"
+  while IFS=$'\t' read -r b mode; do [[ -n "$b" ]] || continue; printf '%s{"name":"%s","public":%s}' "$sep" "$b" "$([[ "$mode" == public ]] && echo true || echo false)"; sep=","; done < <(cat "$dir/.buckets" 2>/dev/null)
+  printf ']}\n'
+}
+
+s3_restore_stage() { # a backup's files → .restore/data next to the live data (the storage keeps running)
+  local name="$1"; with_lock "$name"
+  local dir stage line rest size p sha src; dir="$(club_dir "$name")"; stage="$dir/.restore"
+  rm -rf "$stage"; mkdir -p "$stage/data"
+  local -A have=()
+  if [[ -f "$dir/.files-index" ]]; then
+    while IFS=$'\t' read -r p _ _ sha; do [[ -n "$sha" && -z "${have[$sha]:-}" ]] && have[$sha]="$p"; done < "$dir/.files-index"
+  fi
+  local files=0 copied=0 ended=0
+  while IFS= read -r line; do
+    case "$line" in
+      "D "*|"S "*) size="${line#? }"; [[ "$size" =~ ^[0-9]+$ ]] || die "bad frame"; read_exact "$size" "$stage/ignored" ;;
+      "F "*) rest="${line#F }"; size="${rest%% *}"; p="${rest#* }"
+             [[ "$size" =~ ^[0-9]+$ ]] && safe_rel "$p" || die "bad frame: ${line:0:80}"
+             mkdir -p "$stage/data/$(dirname -- "$p")"; read_exact "$size" "$stage/data/$p"; files=$((files+1)) ;;
+      "C "*) rest="${line#C }"; sha="${rest%% *}"; p="${rest#* }"
+             [[ "$sha" =~ ^[a-f0-9]{64}$ ]] && safe_rel "$p" || die "bad frame: ${line:0:80}"
+             src="${have[$sha]:-}"; [[ -n "$src" && -f "$dir/data/$src" ]] || die "no local copy of $p"
+             mkdir -p "$stage/data/$(dirname -- "$p")"; cp --reflink=auto -- "$dir/data/$src" "$stage/data/$p"; copied=$((copied+1)) ;;
+      E) ended=1; break ;;
+      *) die "bad frame: ${line:0:80}" ;;
+    esac
+  done
+  (( ended )) || die "the backup stream ended early"
+  rm -f "$stage/ignored"
+  chown -R "$S3_UID:$S3_UID" "$stage/data"
+  touch "$stage/.ready"
+  note "Staged $files downloaded and $copied local files for $name"
+}
+
+s3_restore_apply() { # swap the staged files in; the current ones come back if MinIO doesn't start on them
+  local name="$1" image="$2"; with_lock "$name"
+  local dir stage state; dir="$(club_dir "$name")"; stage="$dir/.restore"; state="$(cat "$dir/.state")"
+  [[ -f "$stage/.ready" ]] || die "nothing is staged for $name"
+  log "Stopping $name"
+  compose "$name" "$(cat "$dir/.image")" stop >/dev/null 2>&1 || true
+  log "Swapping in the backup"
+  rm -rf "$dir/.old-data"
+  mv "$dir/data" "$dir/.old-data"
+  mv "$stage/data" "$dir/data"
+  rm -f "$dir/.files-index"
+  if [[ "$state" == running ]]; then
+    compose "$name" "$(cat "$dir/.image")" up -d --force-recreate --remove-orphans
+    if ! wait_healthy "$name" || ! s3_setup "$name"; then
+      echo "!! The storage didn't start on the restored files. Putting the files back as they were" >&2
+      docker logs --tail 40 "$(container "$name")" >&2 || true
+      compose "$name" "$(cat "$dir/.image")" stop >/dev/null 2>&1 || true
+      rm -rf "$dir/data"; mv "$dir/.old-data" "$dir/data"
+      compose "$name" "$(cat "$dir/.image")" up -d --force-recreate
+      wait_healthy "$name" && echo "!! $name is running as before" >&2 || echo "!! $name isn't answering on its old files either" >&2
+      rm -rf "$stage"
+      exit 1
+    fi
+  fi
+  rm -rf "$dir/.old-data" "$stage"
+  log "Restored $name ($state)"
+}
+
 cmd_project_set() {
   local name="$1" project="$2"; need_club "$name"; valid_name "$project" || die "bad project name: $project"
   with_lock "$name"
   local dir; dir="$(club_dir "$name")"
   [[ "$(cat "$dir/.project" 2>/dev/null)" == "$project" ]] && on_net "$(container "$name")" "proj-$project" && { log "$name is already on network proj-$project"; return; }
   echo "$project" > "$dir/.project"
-  if is_app "$name" || is_pg "$name"; then
+  if is_core "$name"; then
     # Their project network is their main one, so the container is made again (a few seconds).
     write_app_env "$dir"
     if [[ "$(cat "$dir/.state" 2>/dev/null)" == running ]]; then
@@ -1194,6 +1537,12 @@ case "${1:-}" in
   db-rotate) [[ $# -eq 2 ]] || die "usage: clubctl db-rotate NAME"; cmd_db_rotate "$2" ;;
   db-readonly) [[ $# -eq 3 ]] || die "usage: clubctl db-readonly NAME on|off"; cmd_db_readonly "$2" "$3" ;;
   db-upgrade) [[ $# -eq 3 ]] || die "usage: clubctl db-upgrade NAME IMAGE"; cmd_db_upgrade "$2" "$3" ;;
+  s3-create) [[ $# -eq 4 ]] || die "usage: clubctl s3-create NAME IMAGE DOMAINS"; cmd_s3_create "$2" "$3" "$4" ;;
+  s3-buckets) [[ $# -eq 2 ]] || die "usage: clubctl s3-buckets NAME"; cmd_s3_buckets "$2" ;;
+  s3-bucket-remove) [[ $# -eq 3 ]] || die "usage: clubctl s3-bucket-remove NAME BUCKET"; cmd_s3_bucket_remove "$2" "$3" ;;
+  s3-stats)  [[ $# -eq 2 ]] || die "usage: clubctl s3-stats NAME"; cmd_s3_stats "$2" ;;
+  s3-credentials) [[ $# -eq 2 ]] || die "usage: clubctl s3-credentials NAME"; cmd_s3_credentials "$2" ;;
+  s3-rotate) [[ $# -eq 2 ]] || die "usage: clubctl s3-rotate NAME"; cmd_s3_rotate "$2" ;;
   logs)      [[ $# -ge 2 && $# -le 3 ]] || die "usage: clubctl logs NAME [LINES]"; cmd_logs "$2" "${3:-200}" ;;
   logs-follow) [[ $# -ge 2 && $# -le 3 ]] || die "usage: clubctl logs-follow NAME [LINES]"; cmd_logs_follow "$2" "${3:-100}" ;;
   *)         die "unknown command: ${1:-} (see the header of this file)" ;;

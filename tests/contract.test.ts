@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { getClub, insertClub, saveServer, type Club } from '@/lib/clubs'
 import { fakeCalls, fakeClubs, fakeFailures } from '@/lib/engine'
 import { enqueue, whenIdle } from '@/lib/ops'
+import { setLinks } from '@/lib/projects'
 import { saveSettings } from '@/lib/settings'
 import { freshEnv } from './setup'
 
@@ -53,6 +54,24 @@ describe('what live servers receive', () => {
     })
     enqueue(pg, 'create', 'a'); await whenIdle()
     expect(calls()).toMatchSnapshot()
+  })
+
+  it('S3 storage service: create, buckets, and an app linked to it (new in clubctl, separate lines)', async () => {
+    const s3 = insertClub({
+      name: 'shop-files', displayName: 'Shop files', serverId, status: 'creating', image: 'docker.io/chainguard/minio:latest', modules: [], customDomains: [], secrets: {}, extraEnv: '',
+      timezone: 'Australia/Sydney', memoryMb: 256, ownerEmail: '', ownerName: '', notes: '', kind: 'minio', appPublic: false,
+      s3Buckets: [{ name: 'media', public: true, objects: null, bytes: null }],
+    })
+    enqueue(s3, 'create', 'a'); await whenIdle()
+    enqueue(getClub(s3.id)!, 'buckets', 'a', { buckets: [{ name: 'media', public: true }, { name: 'private', public: false }] }); await whenIdle()
+    const app = insertClub({
+      name: 'web', displayName: 'Web', serverId, status: 'creating', image: 'docker.io/library/nginx:1.27', modules: [], customDomains: [], secrets: {}, extraEnv: '',
+      timezone: 'Australia/Sydney', memoryMb: 128, ownerEmail: '', ownerName: '', notes: '', kind: 'app', appRepo: '', appBranch: '', appPort: 80, appHealthPath: '/',
+      appImageRef: 'docker.io/library/nginx:1.27', projectId: getClub(s3.id)!.projectId,
+    })
+    setLinks(app.id, [{ dbId: s3.id, prefix: '', bucket: 'media' }])
+    enqueue(app, 'create', 'a'); await whenIdle()
+    expect(calls().map((c) => ({ ...c, stdin: c.stdin?.replace(/@sha256:[a-f0-9]{64}/g, '@sha256:<digest>') }))).toMatchSnapshot()
   })
 })
 
