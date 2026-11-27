@@ -3,9 +3,9 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Icon } from '@/components/Icon'
-import { LANES, NODE_H, NODE_W, edgePath, laneOf, layoutCanvas, type CanvasKind, type CanvasNode } from '@/lib/projectCanvas'
+import { LANES, NODE_H, NODE_W, edgePath, isDataKind, laneOf, layoutCanvas, type CanvasKind, type CanvasNode } from '@/lib/projectCanvas'
 
-const KIND_ICON: Record<CanvasKind, 'globe' | 'rocket' | 'box' | 'db'> = { site: 'globe', app: 'rocket', image: 'box', db: 'db' }
+const KIND_ICON: Record<CanvasKind, 'globe' | 'rocket' | 'box' | 'db' | 'bucket'> = { site: 'globe', app: 'rocket', image: 'box', db: 'db', s3: 'bucket' }
 
 function Status({ node }: { node: CanvasNode }) {
   return <span className={`pc-status ${node.tone}`}><i />{node.statusLabel}</span>
@@ -110,7 +110,7 @@ export function ProjectCanvas({ nodes }: { nodes: CanvasNode[] }) {
         <dl className="facts">
           <dt>Status</dt><dd><Status node={s} /></dd>
           <dt>Web address</dt>
-          <dd>{s.url ? <a href={`https://${s.url}`} target="_blank" rel="noreferrer">{s.url}</a> : <span className="muted">{s.kind === 'db' ? 'None (databases are private)' : 'None (inside the project only)'}</span>}</dd>
+          <dd>{s.url ? <a href={`https://${s.url}`} target="_blank" rel="noreferrer">{s.url}</a> : <span className="muted">{s.kind === 'db' ? 'None (databases are private)' : s.kind === 's3' ? 'None (turn one on in its Settings)' : 'None (inside the project only)'}</span>}</dd>
           <dt>Inside the project</dt><dd className="mono">{s.inside}</dd>
           {s.source && <><dt>{s.sourceLabel}</dt><dd className={s.kind === 'app' || s.kind === 'image' ? 'mono' : ''}>{s.source}</dd></>}
           {s.db && <>
@@ -121,8 +121,8 @@ export function ProjectCanvas({ nodes }: { nodes: CanvasNode[] }) {
               {s.db.pct !== null && <div className={`bar${s.db.pct >= 100 ? ' high' : s.db.pct >= 80 ? ' warn' : ''}`} style={{ marginTop: 4 }}><span style={{ width: `${Math.max(2, s.db.pct)}%` }} /></div>}
             </dd>
           </>}
-          {s.kind === 'app' || s.kind === 'image' ? <><dt>Uses</dt><dd>{uses.length ? <span className="pc-chips">{uses.map((u) => <button key={u.id} type="button" className="pc-chip" onClick={() => choose(u)}><Icon name="db" size={12} /> {u.name}</button>)}</span> : <span className="muted">No databases</span>}</dd></> : null}
-          {s.kind === 'db' && <><dt>Used by</dt><dd>{usedBy.length ? <span className="pc-chips">{usedBy.map((u) => <button key={u.id} type="button" className="pc-chip" onClick={() => choose(u)}><Icon name={KIND_ICON[u.kind]} size={12} /> {u.name}</button>)}</span> : <span className="muted">No apps yet</span>}</dd></>}
+          {s.kind === 'app' || s.kind === 'image' ? <><dt>Uses</dt><dd>{uses.length ? <span className="pc-chips">{uses.map((u) => <button key={u.id} type="button" className="pc-chip" onClick={() => choose(u)}><Icon name={KIND_ICON[u.kind]} size={12} /> {u.name}</button>)}</span> : <span className="muted">No databases or storage</span>}</dd></> : null}
+          {isDataKind(s.kind) && <><dt>Used by</dt><dd>{usedBy.length ? <span className="pc-chips">{usedBy.map((u) => <button key={u.id} type="button" className="pc-chip" onClick={() => choose(u)}><Icon name={KIND_ICON[u.kind]} size={12} /> {u.name}</button>)}</span> : <span className="muted">No apps yet</span>}</dd></>}
           <dt>Memory</dt><dd>{s.memoryMb} MB</dd>
           {s.waitingNetwork && <><dt>Network</dt><dd><span className="badge warn">waiting for a newer clubctl</span></dd></>}
           <dt>Changed</dt><dd className="muted">{s.updated}</dd>

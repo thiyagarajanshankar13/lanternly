@@ -122,7 +122,7 @@ export const sshStreamRunner: StreamRunner = async (server, args, stdin, onStder
 }
 
 // ── Simulated engine for local development and tests ─────────────────────────
-export type FakeClub = { kind?: 'app' | 'postgres'; registryUser?: string; project?: string; links?: string[]; predeploy?: string; password?: string; readOnly?: boolean; jobsPaused?: boolean; state: string; image: string; domains: string; db?: Buffer; files?: Map<string, Buffer>; secrets?: Record<string, string>; staged?: { db: Buffer; files: Map<string, Buffer>; secrets: Record<string, string> } }
+export type FakeClub = { kind?: 'app' | 'postgres' | 'minio'; registryUser?: string; project?: string; links?: string[]; s3Links?: string[]; buckets?: Map<string, boolean>; predeploy?: string; password?: string; readOnly?: boolean; jobsPaused?: boolean; state: string; image: string; domains: string; db?: Buffer; files?: Map<string, Buffer>; secrets?: Record<string, string>; staged?: { db: Buffer; files: Map<string, Buffer>; secrets: Record<string, string> } }
 const g = globalThis as unknown as { __fakeClubs?: Map<string, FakeClub>; __fakeFail?: Set<string>; __fakeCalls?: { args: string[]; stdin?: string }[] }
 export const fakeClubs = () => (g.__fakeClubs ??= new Map())
 /** Tests: make the next call of a command fail, e.g. fakeFailures().add('upgrade'). */
@@ -205,6 +205,49 @@ export const fakeRunner: Runner = async (_server, args, stdin, onOutput) => {
       c.image = a
       return { code: 0, output: say(`==> Copying ${name}`) + say(`==> Starting ${a}`) + say('==> Loading the copy') + say(`==> ${name} now runs ${a}`) }
     }
+    case 's3-create': {
+      if (clubs.has(name)) return { code: 1, output: say(`clubctl: site already exists: ${name}`) }
+      const c: FakeClub = { state: 'running', image: a, domains: b === '-' ? '' : b, kind: 'minio', password: `s3${name.replace(/-/g, '')}0001`, db: Buffer.alloc(0), files: new Map(), secrets: {}, buckets: new Map() }
+      applyServiceLines(c, stdin)
+      output += say(`==> Pulling ${a}`) + fakePin(c, a) + say(`==> Starting storage ${name}${c.project ? ` on network proj-${c.project}` : ''}`)
+      output += [...c.buckets!.keys()].map((bk) => say(`==> Bucket ${bk}`)).join('')
+      clubs.set(name, c)
+      c.db = fakeS3Manifest(c)
+      return { code: 0, output: output + say(`==> Created storage ${name}`) }
+    }
+    case 's3-buckets': {
+      const c = clubs.get(name)
+      if (!c?.buckets) return { code: 1, output: say(`clubctl: ${name} is not a storage`) }
+      applyServiceLines(c, stdin)
+      c.db = fakeS3Manifest(c)
+      return { code: 0, output: [...c.buckets.entries()].map(([bk, pub]) => say(`==> Bucket ${bk} (${pub ? 'public' : 'private'})`)).join('') }
+    }
+    case 's3-bucket-remove': {
+      const c = clubs.get(name)
+      if (!c?.buckets?.has(a)) return { code: 1, output: say(`clubctl: no bucket ${a} in ${name}`) }
+      if ([...(c.files?.keys() ?? [])].some((p) => p.startsWith(`${a}/`))) return { code: 1, output: say(`clubctl: the bucket ${a} still has files; delete them first`) }
+      c.buckets.delete(a)
+      c.db = fakeS3Manifest(c)
+      return { code: 0, output: say(`==> Removed the bucket ${a}`) }
+    }
+    case 's3-stats': {
+      const c = clubs.get(name)
+      if (!c?.buckets) return { code: 1, output: say(`clubctl: ${name} is not a storage`) }
+      const inBucket = (bk: string) => [...(c.files ?? new Map()).entries()].filter(([p]) => p.startsWith(`${bk}/`))
+      const buckets = [...c.buckets.entries()].map(([bk, pub]) => ({ name: bk, public: pub, objects: inBucket(bk).length, bytes: inBucket(bk).reduce((t, [, f]) => t + f.length, 0) }))
+      return { code: 0, output: JSON.stringify({ running: c.state === 'running', bytes: buckets.reduce((t, x) => t + x.bytes, 0), buckets }) + '\n' }
+    }
+    case 's3-credentials': {
+      const c = clubs.get(name)
+      if (!c?.buckets) return { code: 1, output: say(`clubctl: ${name} is not a storage`) }
+      return { code: 0, output: `S3_ENDPOINT=http://${name}:9000\nS3_REGION=us-east-1\nS3_ACCESS_KEY_ID=${name}-app\nS3_SECRET_ACCESS_KEY=${c.password}\n` }
+    }
+    case 's3-rotate': {
+      const c = clubs.get(name)
+      if (!c?.buckets) return { code: 1, output: say(`clubctl: ${name} is not a storage`) }
+      c.password = `s3${Date.now().toString(36)}`
+      return { code: 0, output: say(`==> New secret key for ${name}`) }
+    }
     case 'project-set': {
       const c = clubs.get(name)
       if (!c) return { code: 1, output: say(`clubctl: no such club: ${name}`) }
@@ -241,6 +284,7 @@ export const fakeRunner: Runner = async (_server, args, stdin, onOutput) => {
       if (!c?.staged) return { code: 1, output: say(`clubctl: nothing is staged for ${name}`) }
       if (fakeMissingImages().has(a)) return { code: 3, output: say(`clubctl: image missing: ${a}`) }
       c.db = c.staged.db; c.files = c.staged.files; c.secrets = { ...c.secrets, ...c.staged.secrets }; c.image = a
+      if (c.buckets) { try { c.buckets = new Map((JSON.parse(c.db.toString('utf8')) as { buckets: { name: string; public: boolean }[] }).buckets.map((x) => [x.name, x.public])) } catch { /* keeps the list */ } }
       if (b === 'copy') c.jobsPaused = true
       delete c.staged
       return { code: 0, output: say(`==> Restored ${name} (now on ${a}, ${c.state})`) }
@@ -274,7 +318,10 @@ function fakePin(c: FakeClub, image: string): string {
   return `${c.registryUser ? `==> Signing in to the registry as ${c.registryUser}\n` : ''}Pinned to ${pinned}\n`
 }
 
-/** The CLUBCTL_PROJECT / LINK / PREDEPLOY lines a simulated server keeps, like clubctl does. */
+/** A storage's dump: its bucket list as JSON (never empty, like clubctl's). */
+const fakeS3Manifest = (c: FakeClub) => Buffer.from(JSON.stringify({ buckets: [...(c.buckets ?? new Map()).entries()].map(([name, pub]) => ({ name, public: pub })) }) + '\n')
+
+/** The CLUBCTL_PROJECT / LINK / S3_LINK / BUCKET / PREDEPLOY lines a simulated server keeps, like clubctl does. */
 function applyServiceLines(c: FakeClub, stdin?: string) {
   if (!stdin) return
   const lines = stdin.split('\n')
@@ -283,8 +330,12 @@ function applyServiceLines(c: FakeClub, stdin?: string) {
   if (project) c.project = project
   const registryUser = value('CLUBCTL_REGISTRY_USER').pop()
   if (registryUser) c.registryUser = registryUser
+  if (c.buckets && lines.some((l) => l.startsWith('CLUBCTL_BUCKET='))) {
+    c.buckets = new Map(value('CLUBCTL_BUCKET').map((l) => [l.split(':')[0], l.endsWith(':public')]))
+  }
   if (c.kind === 'app' && lines.some((l) => l.startsWith('CLUBCTL_PREDEPLOY_B64='))) {
     c.links = value('CLUBCTL_LINK')
+    c.s3Links = value('CLUBCTL_S3_LINK')
     c.predeploy = Buffer.from(value('CLUBCTL_PREDEPLOY_B64').pop() ?? '', 'base64').toString('utf8')
   }
 }

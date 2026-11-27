@@ -3,7 +3,7 @@ import { requireOwner, requireProject } from '@/lib/guards'
 import { requireAdmin } from '@/lib/auth'
 import { canBuildInProject, isOwner } from '@/lib/access'
 import { listProjects } from '@/lib/projects'
-import { databasesIn } from '@/lib/services'
+import { linkableIn } from '@/lib/services'
 import { clubCount, listServers } from '@/lib/clubs'
 import { getSettings } from '@/lib/settings'
 import { ActionForm } from '@/components/ActionForm'
@@ -24,7 +24,7 @@ export default async function NewImageAppPage({ searchParams }: { searchParams: 
   const serverName = new Map(servers.map((s) => [s.id, s.name]))
   const projects = listProjects().filter((p) => canBuildInProject(admin, p.id)).map((p) => ({
     id: p.id, displayName: p.displayName, server: serverName.get(p.serverId) ?? '',
-    databases: databasesIn(p.id).map((d) => ({ id: d.id, name: d.name, displayName: d.displayName })),
+    databases: linkableIn(p.id).map((d) => ({ id: d.id, name: d.name, displayName: d.displayName, kind: d.kind, buckets: d.s3Buckets.map((b) => b.name) })),
   }))
   return (
     <>
@@ -68,7 +68,7 @@ export default async function NewImageAppPage({ searchParams }: { searchParams: 
         </div>
 
         <div className="card">
-          <h2>Project and databases</h2>
+          <h2>Project, databases and storage</h2>
           <ProjectChoice projects={projects} initial={asked || undefined} fixed={!!asked} allowNew={owner} noNewDb />
         </div>
 

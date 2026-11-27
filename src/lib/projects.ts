@@ -62,23 +62,28 @@ export function deleteProject(id: number): string | null {
   return null
 }
 
-// ── Links: which databases an app gets the variables of ─────────────────────
-export type Link = { appId: number; dbId: number; prefix: string }
+// ── Links: which databases (and storage) an app gets the variables of ───────
+/** dbId is the database's or storage's id; bucket is only used for storage ('' = its first bucket). */
+export type Link = { appId: number; dbId: number; prefix: string; bucket: string }
+type LinkRow = { app_id: number; db_id: number; prefix: string; bucket: string }
+const toLink = (r: LinkRow): Link => ({ appId: r.app_id, dbId: r.db_id, prefix: r.prefix, bucket: r.bucket ?? '' })
 
 export function linksOfApp(appId: number): Link[] {
-  return (db().prepare('SELECT app_id, db_id, prefix FROM service_links WHERE app_id = ? ORDER BY prefix, db_id').all(appId) as { app_id: number; db_id: number; prefix: string }[])
-    .map((r) => ({ appId: r.app_id, dbId: r.db_id, prefix: r.prefix }))
+  return (db().prepare('SELECT app_id, db_id, prefix, bucket FROM service_links WHERE app_id = ? ORDER BY prefix, db_id').all(appId) as LinkRow[]).map(toLink)
 }
 export function linksToDb(dbId: number): Link[] {
-  return (db().prepare('SELECT app_id, db_id, prefix FROM service_links WHERE db_id = ? ORDER BY app_id').all(dbId) as { app_id: number; db_id: number; prefix: string }[])
-    .map((r) => ({ appId: r.app_id, dbId: r.db_id, prefix: r.prefix }))
+  return (db().prepare('SELECT app_id, db_id, prefix, bucket FROM service_links WHERE db_id = ? ORDER BY app_id').all(dbId) as LinkRow[]).map(toLink)
 }
-export function setLinks(appId: number, links: { dbId: number; prefix: string }[]) {
+export function setLinks(appId: number, links: { dbId: number; prefix: string; bucket?: string }[]) {
   db().transaction(() => {
     db().prepare('DELETE FROM service_links WHERE app_id = ?').run(appId)
-    const add = db().prepare('INSERT OR REPLACE INTO service_links (app_id, db_id, prefix) VALUES (?, ?, ?)')
-    for (const l of links) add.run(appId, l.dbId, l.prefix)
+    const add = db().prepare('INSERT OR REPLACE INTO service_links (app_id, db_id, prefix, bucket) VALUES (?, ?, ?, ?)')
+    for (const l of links) add.run(appId, l.dbId, l.prefix, l.bucket ?? '')
   })()
+}
+/** Points links at a bucket that is gone back to the storage's first bucket. */
+export function clearBucketLinks(storageId: number, bucket: string) {
+  db().prepare('UPDATE service_links SET bucket = ? WHERE db_id = ? AND bucket = ?').run('', storageId, bucket)
 }
 
 // ── Pure rules ───────────────────────────────────────────────────────────────
@@ -109,28 +114,36 @@ export function prefixError(prefix: string): string | null {
   return /^[A-Z][A-Z0-9_]{0,30}_$/.test(prefix) ? null : 'A prefix is capital letters, digits and _, ending in _ (for example ANALYTICS_).'
 }
 
-/** Two links that would give the app the same variable names. */
-export function linksClash(links: { prefix: string }[]): string | null {
+/** Two links that would give the app the same variable names (a database and a storage never clash: their names differ). */
+export function linksClash(links: { prefix: string; storage?: boolean }[]): string | null {
   const seen = new Set<string>()
   for (const l of links) {
-    if (seen.has(l.prefix)) return l.prefix ? `Two databases use the prefix ${l.prefix}.` : 'Two databases have no prefix, so they would set the same DATABASE_URL. Give one a prefix such as ANALYTICS_.'
-    seen.add(l.prefix)
+    const key = `${l.storage ? 's3' : 'pg'}:${l.prefix}`
+    if (seen.has(key)) {
+      if (l.storage) return l.prefix ? `Two storages use the prefix ${l.prefix}.` : 'Two storages have no prefix, so they would set the same S3_ENDPOINT. Give one a prefix such as MEDIA_.'
+      return l.prefix ? `Two databases use the prefix ${l.prefix}.` : 'Two databases have no prefix, so they would set the same DATABASE_URL. Give one a prefix such as ANALYTICS_.'
+    }
+    seen.add(key)
   }
   return null
 }
 
-const REF = /\$\{\{\s*([a-z][a-z0-9-]{0,40})\.([A-Z_]+)\s*\}\}/g
+const REF = /\$\{\{\s*([a-z][a-z0-9-]{0,40})\.([A-Z0-9_]+)\s*\}\}/g
 
 /** Every ${{service.VAR}} in a block of settings. */
 export function parseRefs(text: string): { service: string; variable: string }[] {
   return [...text.matchAll(REF)].map((m) => ({ service: m[1], variable: m[2] }))
 }
 
-/** Checks the references in an app's settings against the databases in its project. */
-export function refsError(text: string, databasesInProject: string[]): string | null {
+/** Checks the references in an app's settings against the databases (and storage) in its project. */
+export function refsError(text: string, databasesInProject: string[], storageInProject: string[] = []): string | null {
   if (/\$\{\{/.test(text.replace(REF, ''))) return 'A reference looks like ${{database.VARIABLE}}, for example ${{shop-db.DATABASE_URL}}.'
   for (const r of parseRefs(text)) {
-    if (!databasesInProject.includes(r.service)) return `\${{${r.service}.${r.variable}}}: there is no database called ${r.service} in this project.`
+    if (storageInProject.includes(r.service)) {
+      if (!(S3_VARS as readonly string[]).includes(r.variable)) return `\${{${r.service}.${r.variable}}}: a storage has ${S3_VARS.join(', ')}.`
+      continue
+    }
+    if (!databasesInProject.includes(r.service)) return `\${{${r.service}.${r.variable}}}: there is no ${storageInProject.length ? 'database or storage' : 'database'} called ${r.service} in this project.`
     if (!(PG_VARS as readonly string[]).includes(r.variable)) return `\${{${r.service}.${r.variable}}}: a database has ${PG_VARS.join(', ')}.`
   }
   return null
@@ -163,6 +176,46 @@ export const PG_QUOTA_MAX = 200_000
 /** Postgres settings sized to the container's memory (clubctl uses the same sums). */
 export function pgTuning(memoryMb: number): { sharedBuffersMb: number; maxConnections: number } {
   return { sharedBuffersMb: Math.max(16, Math.floor(memoryMb / 4)), maxConnections: Math.min(200, Math.max(20, Math.floor(memoryMb / 6))) }
+}
+
+// ── S3 storage (MinIO) ───────────────────────────────────────────────────────
+
+/** The variables a connected app gets from a storage (each with the link's prefix in front). */
+export const S3_VARS = ['S3_ENDPOINT', 'S3_PUBLIC_URL', 'S3_REGION', 'S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_FORCE_PATH_STYLE'] as const
+/** With no prefix the app also gets these, which AWS SDKs read by themselves. */
+export const S3_AWS_VARS = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION', 'AWS_DEFAULT_REGION', 'AWS_ENDPOINT_URL_S3'] as const
+export const S3_REGION = 'us-east-1'
+/** MinIO stopped publishing its own images in 2025; Chainguard's build is free and kept patched. Pinned to a digest at create. */
+export const S3_DEFAULT_IMAGE = 'docker.io/chainguard/minio:latest'
+export const S3_MEMORY_MIN = 128
+export const S3_MEMORY_MAX = 4096
+export const S3_QUOTA_MIN = 1024
+export const S3_QUOTA_MAX = 2_000_000
+export const S3_MAX_BUCKETS = 20
+
+/** What an app sees, with the secret hidden (the real one is filled in on the server). */
+export function s3VarsShown(name: string, opts: { prefix?: string; bucket?: string; publicUrl?: string | null } = {}): { key: string; value: string }[] {
+  const p = opts.prefix ?? ''
+  const endpoint = `http://${name}:9000`
+  const rows = [
+    { key: `${p}S3_ENDPOINT`, value: endpoint },
+    { key: `${p}S3_PUBLIC_URL`, value: opts.publicUrl || endpoint },
+    { key: `${p}S3_REGION`, value: S3_REGION },
+    { key: `${p}S3_BUCKET`, value: opts.bucket || '(its first bucket)' },
+    { key: `${p}S3_ACCESS_KEY_ID`, value: `${name}-app` },
+    { key: `${p}S3_SECRET_ACCESS_KEY`, value: '•••• (made on the server)' },
+    { key: `${p}S3_FORCE_PATH_STYLE`, value: 'true' },
+  ]
+  if (!p) rows.push({ key: 'AWS_*', value: `AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_DEFAULT_REGION, AWS_ENDPOINT_URL_S3 (the same values)` })
+  return rows
+}
+
+/** S3 bucket names here: 3–63 lowercase letters, digits and hyphens (no dots, so they work in every client). */
+export function bucketNameError(name: string): string | null {
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(name)) return 'A bucket name is 3 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit.'
+  if (name.includes('--')) return 'A bucket name has no double hyphens.'
+  if (/^xn--|^sthree-|-s3alias$|--ol-s3$/.test(name)) return 'That bucket name is reserved in S3.'
+  return null
 }
 
 /** Quota level reached: 0, 80 or 100 (percent). */

@@ -2,7 +2,7 @@ import { requireOwner, requireProject } from '@/lib/guards'
 import { requireAdmin } from '@/lib/auth'
 import { canBuildInProject, isOwner } from '@/lib/access'
 import { listProjects } from '@/lib/projects'
-import { databasesIn } from '@/lib/services'
+import { linkableIn } from '@/lib/services'
 import { ProjectChoice } from '@/components/ProjectChoice'
 import Link from 'next/link'
 import { clubCount, listServers } from '@/lib/clubs'
@@ -26,7 +26,7 @@ export default async function NewAppPage({ searchParams }: { searchParams: Promi
   const serverName = new Map(servers.map((s) => [s.id, s.name]))
   const projects = listProjects().filter((p) => canBuildInProject(admin, p.id)).map((p) => ({
     id: p.id, displayName: p.displayName, server: serverName.get(p.serverId) ?? '',
-    databases: databasesIn(p.id).map((d) => ({ id: d.id, name: d.name, displayName: d.displayName })),
+    databases: linkableIn(p.id).map((d) => ({ id: d.id, name: d.name, displayName: d.displayName, kind: d.kind, buckets: d.s3Buckets.map((b) => b.name) })),
   }))
   const ready = githubConfigured()
   let repos: Repo[] = []
@@ -68,7 +68,7 @@ export default async function NewAppPage({ searchParams }: { searchParams: Promi
         </div>
 
         <div className="card">
-          <h2>Project and databases</h2>
+          <h2>Project, databases and storage</h2>
           <ProjectChoice projects={projects} initial={asked || undefined} fixed={!!asked} allowNew={owner} />
         </div>
 

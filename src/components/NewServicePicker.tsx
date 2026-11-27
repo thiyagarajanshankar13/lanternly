@@ -10,17 +10,42 @@ import { Icon, type IconName } from './Icon'
  * here as a second step with a way back. The pane remounts this on every open, so it
  * always starts on the list.
  */
-export function NewServicePicker({ pluginChoices = [], githubHref, imageHref, databases, children }: {
+export function NewServicePicker({ pluginChoices = [], githubHref, imageHref, databases, storages = [], storageForm, children }: {
   /** Service kinds of the plugins that are on, that this person may add (owners only). Shown under "From plugins". */
   pluginChoices?: { href: string; icon: IconName; title: string; text: string; from: string }[]
   githubHref: string
   imageHref: string
   /** Names of the project's existing databases. */
   databases: string[]
+  /** Names of the project's existing S3 storages. */
+  storages?: string[]
+  /** The storage form, shown on the second step. */
+  storageForm?: React.ReactNode
   /** The database form, shown on the second step. */
   children: React.ReactNode
 }) {
-  const [step, setStep] = useState<'pick' | 'database'>('pick')
+  const [step, setStep] = useState<'pick' | 'database' | 'storage'>('pick')
+
+  if (step === 'storage') {
+    return (
+      <div className="svc-step">
+        <button type="button" className="svc-back" onClick={() => setStep('pick')}><Icon name="back" size={16} /> All service types</button>
+        <div className="svc-title">
+          <span className="svc-icon data"><Icon name="bucket" size={20} /></span>
+          <div>
+            <h3>New S3 storage</h3>
+            <p>Its own MinIO server. Files stay on this project&apos;s server and are backed up like a site.</p>
+          </div>
+        </div>
+        {storages.length > 0 && (
+          <div className="notice warn">
+            This project already has {storages.length === 1 ? <span className="mono">{storages[0]}</span> : `${storages.length} storages`}. Apps can share it, each with its own bucket: add a bucket on its page. Add another storage only when you want separate files and keys.
+          </div>
+        )}
+        {storageForm}
+      </div>
+    )
+  }
 
   if (step === 'database') {
     return (
@@ -60,6 +85,19 @@ export function NewServicePicker({ pluginChoices = [], githubHref, imageHref, da
         </span>
         <Icon name="next" size={16} />
       </button>
+      {storageForm && (
+        <button type="button" className="svc-choice" onClick={() => setStep('storage')}>
+          <span className="svc-icon data"><Icon name="bucket" size={20} /></span>
+          <span className="svc-text">
+            <strong>S3 storage <span className="muted" style={{ fontWeight: 500 }}>(MinIO)</span></strong>
+            <span>Buckets for files, images and uploads. Works with any AWS S3 library.</span>
+            {storages.length > 0 && (
+              <span className="svc-has"><span className="dot" />Already has {storages.length === 1 ? <span className="mono">{storages[0]}</span> : `${storages.length} storages`}</span>
+            )}
+          </span>
+          <Icon name="next" size={16} />
+        </button>
+      )}
       {pluginChoices.length > 0 && (
         <>
           <p className="svc-group">From plugins</p>

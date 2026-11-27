@@ -9,6 +9,7 @@ import {
   PG_DEFAULT_VERSION, PG_MEMORY_MAX, PG_MEMORY_MIN, PG_QUOTA_MAX, PG_QUOTA_MIN, PG_VERSIONS, pgImage, quotaLevel, type Project,
 } from '../projects'
 import { appsUsing } from '../services'
+import { runStorageWatch } from '../storage/service'
 
 // PostgreSQL services: creating one, and the 5-minute watch that keeps its
 // numbers, sends the quota alerts and stops writes at 100% of the quota.
@@ -120,7 +121,7 @@ export async function checkDatabase(club: Club): Promise<Stats | null> {
   return stats
 }
 
-/** One pass over every database, plus moving services onto their project networks. */
+/** One pass over every database and storage, plus moving services onto their project networks. */
 export async function runDatabaseWatch(): Promise<number> {
   if (g.__pgBusy) return 0
   g.__pgBusy = true
@@ -129,6 +130,7 @@ export async function runDatabaseWatch(): Promise<number> {
     for (const club of listClubs().filter((c) => c.kind === 'postgres')) {
       try { if (await checkDatabase(club)) n++ } catch (err) { console.error(`[postgres] check of ${club.name} failed:`, (err as Error).message) }
     }
+    n += await runStorageWatch()
     syncProjectNetworks()
     return n
   } finally {

@@ -77,7 +77,7 @@ export function AccessPicker({ sites, projects = [], role: initialRole = 'viewer
                 {shown.map((s) => (
                   <label key={s.id} htmlFor={`${idPrefix}-site-${s.id}`}>
                     <input id={`${idPrefix}-site-${s.id}`} type="checkbox" checked={picked.has(s.id)} onChange={() => toggle(s.id)} />
-                    {s.displayName}<span className="muted">{s.kind === 'app' ? 'app' : s.kind === 'postgres' ? 'database' : s.name}</span>
+                    {s.displayName}<span className="muted">{s.kind === 'app' ? 'app' : s.kind === 'postgres' ? 'database' : s.kind === 'minio' ? 'storage' : s.name}</span>
                   </label>
                 ))}
               </div>

@@ -15,7 +15,7 @@ describe('project canvas', () => {
 
   it('skips empty lanes and draws only links inside the project', () => {
     const l = layoutCanvas([node(1, 'app', 'a.avro.site', [3, 99]), node(3, 'db', null)])
-    expect(l.lanes.map((x) => x.label)).toEqual(['On the web', 'Databases'])
+    expect(l.lanes.map((x) => x.label)).toEqual(['On the web', 'Data'])
     expect(l.edges).toEqual([{ from: 1, to: 3 }])
     expect(l.pos[3].y).toBeGreaterThan(l.pos[1].y)
     expect(l.pos[1].x).toBe(l.pos[3].x) // both centred
