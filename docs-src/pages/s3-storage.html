@@ -1,28 +1,71 @@
-<!-- title: S3 storage (MinIO) | desc: Coming soon: S3-compatible bucket storage as a project service, running MinIO on your own server and linked to apps. -->
-<div class="soon"><b class="t">Coming soon</b><p>S3 storage is built and in review, and isn't in a release yet. This page describes how it will work so you can plan for it. Watch the <a href="https://github.com/thiyagarajanshankar13/lanternly">repo</a> for the release.</p></div>
+<!-- title: S3 storage (MinIO) | desc: S3-compatible bucket storage as a project service: MinIO on your own server, buckets with public or private access, app links, keys, quota and backups. -->
+<p class="lead">S3 storage gives a project its own S3-compatible bucket storage on its server, next to PostgreSQL, so apps can keep uploads, images and files without an outside service.</p>
 
-<p class="lead">S3 storage gives a project its own S3-compatible bucket storage on its server, next to PostgreSQL, so apps can keep uploads and files without an outside service.</p>
+<h2>Create a storage</h2>
+<ol class="steps">
+<li>Open a project and press <strong>New service → S3 storage (MinIO)</strong>.</li>
+<li>Give it a <strong>name</strong>, such as <code>shop-files</code>. Apps in the project reach it at <code>http://shop-files:9000</code>.</li>
+<li>Optionally tick <strong>Give it a web address</strong> (<code>shop-files.example.com</code>, with HTTPS). You need one if browsers should load files from public buckets or signed links, or if you want to use S3 tools from your computer.</li>
+<li>Name the <strong>first bucket</strong> (<code>files</code> unless you change it) and choose whether anyone with the link may read it, then press <strong>Create</strong>.</li>
+</ol>
+<p>Each storage is its own container running a patched MinIO image (pinned to the digest it pulled), with 256 MB of memory by default and its data in its folder on the server. It has no published port: only the project's services reach it, plus the web address if you turned one on, which Monitoring then watches.</p>
+<div class="note"><b class="t">Servers need a recent clubctl</b><p>Storage needs the <code>clubctl</code> from the release that added it. On an older server the create fails with a clear message: run the services VM setup again (see <a href="upgrading.html#update-clubctl-on-servers">Update clubctl</a>), then press <strong>Try again</strong>.</p></div>
 
-<h2>What you'll get</h2>
+<h2>Buckets</h2>
+<p>A storage holds up to 20 buckets. Under <strong>Buckets</strong> on its page:</p>
 <ul>
-<li><strong>New service → S3 storage (MinIO).</strong> Its own container per storage, running a patched MinIO image pinned to the pulled digest, 256 MB of memory and no published port.</li>
-<li><strong>Buckets.</strong> Up to 20 per storage. Add one, remove an empty one, and choose who can read it: <strong>Apps only</strong> or <strong>Anyone with the link</strong>.</li>
-<li><strong>Optional web address</strong> with HTTPS, so browsers can open public files and signed links. It's monitored like any other address.</li>
-<li><strong>Keys made on the server</strong> and never stored by the console. <strong>Connect → Show values</strong> reads them over SSH and writes it to the access log. <strong>New keys</strong> rotates them and restarts the apps that use them.</li>
-<li><strong>Soft quota</strong> (10 GB by default) with emails at 80% and 100%. Writes are never stopped.</li>
-<li><strong>Backups and restore</strong> through the normal <a href="backups.html">bucket backups</a>.</li>
+<li><strong>Add a bucket</strong>: 3 to 63 lowercase letters, digits and hyphens.</li>
+<li><strong>Who can read</strong>: <strong>Apps only</strong> (they use the key, or hand out signed links) or <strong>Anyone with the link</strong> (for images on a website). A public bucket's files are at <code>https://shop-files.example.com/&lt;bucket&gt;/&lt;file&gt;</code>.</li>
+<li><strong>Remove</strong>: only an empty bucket is removed. Delete its files first, from an app or with an S3 tool.</li>
 </ul>
+<p>File counts and sizes per bucket are checked every 5 minutes.</p>
 
-<h2>Linking storage to an app</h2>
-<p>In the app's settings (the section becomes <strong>Databases and storage</strong>), tick the storage and pick a bucket. The app gets:</p>
+<h2>Link storage to an app</h2>
+<p>In the app's settings, under <strong>Databases and storage</strong>, tick the storage and pick a bucket. The app restarts with:</p>
 <pre><code>S3_ENDPOINT=http://shop-files:9000
 S3_PUBLIC_URL=https://shop-files.example.com
-S3_REGION=…
+S3_REGION=us-east-1
 S3_BUCKET=uploads
 S3_ACCESS_KEY_ID=…
 S3_SECRET_ACCESS_KEY=…
 S3_FORCE_PATH_STYLE=true</code></pre>
-<p>With no prefix it also gets the <code>AWS_*</code> names AWS SDKs read, so most S3 libraries work without code changes. <code>${{shop-files.S3_ENDPOINT}}</code> references work too.</p>
+<ul>
+<li>With no prefix, the app also gets the <code>AWS_*</code> names (<code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>, <code>AWS_REGION</code>…) that AWS SDKs read, so most S3 libraries work without code changes.</li>
+<li>For a second storage or bucket, give it a <strong>prefix</strong> such as <code>MEDIA_</code>: the app gets <code>MEDIA_S3_ENDPOINT</code> and so on.</li>
+<li>One value in any setting works too: <code>FILES_URL=${{shop-files.S3_PUBLIC_URL}}</code>.</li>
+</ul>
+<p>The secret key is filled in on the server, so it never appears in the app's settings in the console. Use path-style addressing in your S3 client.</p>
+<pre><code><span class="c">// Node, AWS SDK v3</span>
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+const s3 = new S3Client({
+  endpoint: process.env.S3_ENDPOINT,
+  region: process.env.S3_REGION,
+  forcePathStyle: true,
+})
+await s3.send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: 'hello.txt', Body: 'hi' }))</code></pre>
+<p>Hand browsers a signed link (or the public URL for a public bucket) built on <code>S3_PUBLIC_URL</code>, since <code>S3_ENDPOINT</code> only works inside the project.</p>
 
-<h2>When it ships</h2>
-<p>Servers will need the new <code>clubctl</code>: run the services VM setup (or the <strong>Set up a VM</strong> workflow) again after upgrading. Until then, creating a storage fails with a clear message, and <strong>Try again</strong> works afterwards.</p>
+<h2>Keys</h2>
+<ul>
+<li>Keys are made on the server and never stored by the console.</li>
+<li><strong>Connect</strong> shows the values an app needs; <strong>Show the secret key</strong> reads it over SSH once, and each time is written to the access log.</li>
+<li><strong>New keys</strong> rotates the app key and restarts the apps that use it.</li>
+</ul>
+
+<h2>Using S3 tools from your computer</h2>
+<p>With a web address turned on, any S3 tool can use it as the endpoint with the values from Connect:</p>
+<pre><code>aws s3 ls s3://uploads --endpoint-url https://shop-files.example.com
+mc alias set shop-files https://shop-files.example.com KEY SECRET</code></pre>
+<p>Without a web address, only apps in the project can reach the storage.</p>
+
+<h2>Quota</h2>
+<p>Each storage has a soft quota (10 GB by default, under <strong>Settings</strong>). The alert addresses get an email at 80% and 100%. Writes never stop: the server's disk is the real limit, so keep an eye on it on the Servers page.</p>
+
+<h2>Backups and removing</h2>
+<ul>
+<li>Storage is backed up with your other services to your <a href="backups.html">backup bucket</a>: every bucket's files, stored once per content and encrypted. Restoring puts the whole storage back as it was, or makes a copy.</li>
+<li><strong>Remove this storage</strong> (owners) takes a final backup, then moves its data aside on the server.</li>
+</ul>
+
+<h2>The storage's page</h2>
+<p><strong>Connect</strong>, <strong>Buckets</strong>, <strong>About</strong> (address, apps using it, size against the quota), <strong>Backups</strong>, <strong>Logs</strong> and <strong>History</strong>, plus <strong>Settings</strong> for memory (changing it restarts the storage for a few seconds), quota, web address and notes. On the project diagram, storage sits in the bottom row (now called <strong>Data</strong>) with its own icon, and apps have lines to the storage they use.</p>

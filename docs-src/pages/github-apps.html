@@ -43,7 +43,7 @@ CMD ["node", "server.js"]</code></pre>
 <li>Give it a short <strong>name</strong>: its address becomes <code>&lt;name&gt;.example.com</code> and other services in the project reach it by this name.</li>
 <li>Change the advanced fields if needed: <strong>Dockerfile</strong> path, <strong>port</strong>, <strong>health page</strong>, memory.</li>
 <li>Add <strong>settings</strong> and <strong>secret settings</strong>, one <code>NAME=value</code> per line. Secret ones are stored encrypted, masked in logs and never shown again.</li>
-<li>Under <strong>Databases</strong>, tick a database to link, or <strong>Create a new PostgreSQL database for it</strong>. See <a href="postgres.html#link-a-database-to-an-app">Link a database</a>.</li>
+<li>Under <strong>Databases and storage</strong>, tick a database or storage to link, or <strong>Create a new PostgreSQL database for it</strong>. See <a href="postgres.html#link-a-database-to-an-app">Link a database</a>.</li>
 <li>Optionally a <strong>Pre-deploy command</strong> such as <code>npm run migrate</code>.</li>
 <li>Press <strong>Create app</strong>.</li>
 </ol>
@@ -83,12 +83,13 @@ CMD ["node", "server.js"]</code></pre>
 <tr><td><code>PORT</code></td><td>The port you set. You can't override it in settings.</td></tr>
 <tr><td>Your settings and secrets</td><td>The app's Settings.</td></tr>
 <tr><td><code>DATABASE_URL</code>, <code>PGHOST</code>, <code>PGPORT</code>, <code>PGUSER</code>, <code>PGPASSWORD</code>, <code>PGDATABASE</code></td><td>Each linked database (with its prefix, if any).</td></tr>
+<tr><td><code>S3_ENDPOINT</code>, <code>S3_BUCKET</code>, keys… (and <code>AWS_*</code>)</td><td>Each linked storage. See <a href="s3-storage.html#link-storage-to-an-app">S3 storage</a>.</td></tr>
 <tr><td><code>${{shop-db.DATABASE_URL}}</code> in any value</td><td>Filled in on the server from a database in the same project.</td></tr>
 </table></div>
 
 <h2>Limits</h2>
 <ul>
-<li>Apps have no volumes yet: anything written inside the container is lost on the next deploy. Keep data in a <a href="postgres.html">database</a> (or <a href="s3-storage.html">S3 storage</a> once it ships).</li>
+<li>Apps have no volumes yet: anything written inside the container is lost on the next deploy. Keep data in a <a href="postgres.html">database</a> or <a href="s3-storage.html">S3 storage</a>.</li>
 <li>One build at a time per app.</li>
 <li>Apps get 1 CPU, a memory limit, a process limit and <code>no-new-privileges</code>.</li>
 </ul>

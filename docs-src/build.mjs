@@ -59,7 +59,7 @@ const navTitle = (p) => (p.slug === 'index' ? 'Introduction' : p.title)
 
 function sidebar(current) {
   return NAV.map((g) => `<div class="nav-group"><p class="nav-head">${esc(g.group)}</p><ul>${g.items
-    .map((s) => `<li><a href="${href(s)}"${s === current ? ' aria-current="page"' : ''}>${esc(navTitle(bySlug[s]))}${s === 's3-storage' ? ' <span class="pill">soon</span>' : ''}</a></li>`)
+    .map((s) => `<li><a href="${href(s)}"${s === current ? ' aria-current="page"' : ''}>${esc(navTitle(bySlug[s]))}</a></li>`)
     .join('')}</ul></div>`).join('')
 }
 
