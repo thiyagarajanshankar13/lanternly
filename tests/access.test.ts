@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import {
-  type Access, accessChip, accessSummary, canOperateSite, canSeeSite, canUsePage, lastOwnerError, maskSecrets, pagesFor, secretValues, visibleTo,
+  type Access, accessChip, accessSummary, canOperateSite, canSeeSite, canUsePage, homePage, lastOwnerError, maskSecrets, pagesFor, secretValues, visibleTo,
 } from '@/lib/access'
 import { acceptInvite, checkPassword, createAdmin, findInvite, getAdmin, inviteAdmin, ownerCount, ownerEmails, renewInvite, setAccess, setSuspended } from '@/lib/auth'
 import { audit, auditView, listAudit } from '@/lib/audit'
@@ -38,7 +38,10 @@ describe('access rules', () => {
     const rows = [{ id: 1 }, { id: 2 }, { id: 3 }]
     expect(visibleTo(viewer, rows, (r) => r.id).map((r) => r.id)).toEqual([2])
     expect(visibleTo(owner, rows, (r) => r.id)).toHaveLength(3)
-    expect(pagesFor(viewer)).toEqual(['/admin/projects', '/admin', '/admin/monitor', '/admin/activity', '/admin/account'])
+    expect(pagesFor(viewer)).toEqual(['/admin/projects', '/admin/services', '/admin/monitor', '/admin/activity', '/admin/account'])
+    // Signing in and /admin land on Projects, for every role.
+    expect(homePage(viewer)).toBe('/admin/projects')
+    expect(homePage(owner)).toBe('/admin/projects')
     for (const page of ['/admin/costs', '/admin/servers', '/admin/settings', '/admin/people', '/admin/backups', '/admin/assistant']) {
       expect(canUsePage(operator, page)).toBe(false)
       expect(canUsePage(owner, page)).toBe(true)

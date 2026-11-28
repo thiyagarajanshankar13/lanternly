@@ -119,7 +119,7 @@ export async function removeClubAction(_prev: FormState, form: FormData): Promis
   }
   if (club.status === 'failed' && form.get('recordOnly') === 'on') {
     deleteClubRow(club.id)
-    redirect('/admin')
+    redirect('/admin/services')
   }
   updateClub(club.id, { status: 'removing' })
   enqueue(getClub(club.id)!, 'remove', admin.email)

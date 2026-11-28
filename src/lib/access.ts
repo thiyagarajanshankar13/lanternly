@@ -66,16 +66,19 @@ export function visibleTo<T>(p: Access, rows: T[], clubIdOf: (row: T) => number 
 /** Every page in the side menu. */
 /** The core's side-menu pages. Plugins add their own (owners only), see src/plugins. */
 export const CONSOLE_PAGES = [
-  '/admin/projects', '/admin', '/admin/monitor', '/admin/backups', '/admin/activity',
+  '/admin/projects', '/admin/services', '/admin/monitor', '/admin/backups', '/admin/activity',
   '/admin/people', '/admin/servers', '/admin/settings', '/admin/account',
 ]
-const SITE_PAGES = ['/admin/projects', '/admin', '/admin/monitor', '/admin/activity', '/admin/account']
+const SITE_PAGES = ['/admin/projects', '/admin/services', '/admin/monitor', '/admin/activity', '/admin/account']
 
 /** The side menu pages each role gets. Everything else is for owners. */
 export function canUsePage(p: Access, href: string): boolean {
   return p.role === 'owner' || SITE_PAGES.includes(href)
 }
 export const pagesFor = (p: Access) => CONSOLE_PAGES.filter((href) => canUsePage(p, href))
+
+/** Where signing in (and opening /admin) lands: Projects, else the first menu page this person can open. */
+export const homePage = (p: Access): string => pagesFor(p)[0] ?? '/admin/account'
 
 /** "Viewer · 3 sites", for the top bar. */
 export function accessChip(p: Access): string {

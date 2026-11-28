@@ -48,7 +48,7 @@ export function StorageView({ club, can }: { club: Club; can: { operate: boolean
       {busy && <AutoRefresh seconds={5} />}
       <div className="page-head">
         <div>
-          <p className="small" style={{ marginBottom: 4 }}>{project ? <Link href={`/admin/projects/${project.id}`}>← {project.displayName}</Link> : <Link href="/admin">← Sites</Link>}</p>
+          <p className="small" style={{ marginBottom: 4 }}>{project ? <Link href={`/admin/projects/${project.id}`}>← {project.displayName}</Link> : <Link href="/admin/services">← Sites</Link>}</p>
           <h1>{club.displayName} <ClubBadge status={club.status} /> <span className="badge info">S3 storage</span></h1>
           <p className="muted">Inside the project at <span className="mono">http://{club.name}:9000</span>.{' '}
             {domain ? <>On the web at <a href={publicUrl!} target="_blank" rel="noreferrer">{domain}</a> (files in public buckets, and signed links).</> : 'Not reachable from the internet.'}</p>
