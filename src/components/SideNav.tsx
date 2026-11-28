@@ -9,8 +9,8 @@ export type NavItem = { href: string; label: string; icon: IconName; group: stri
 type Item = NavItem
 
 const ITEMS: Item[] = [
-  { href: '/admin', label: 'Sites', icon: 'sites', group: 'Operate', also: ['/admin/clubs', '/admin/apps'] },
   { href: '/admin/projects', label: 'Projects', icon: 'project', group: 'Operate' },
+  { href: '/admin/services', label: 'Sites', icon: 'sites', group: 'Operate', also: ['/admin/clubs', '/admin/apps'] },
   { href: '/admin/monitor', label: 'Monitoring', icon: 'monitor', group: 'Operate' },
   { href: '/admin/backups', label: 'Backups', icon: 'backups', group: 'Operate' },
   { href: '/admin/activity', label: 'Activity', icon: 'activity', group: 'Observe' },
@@ -31,13 +31,13 @@ function withPluginItems(extra: Item[]): Item[] {
 }
 /** The menu for one person: only the pages their role can open (see lib/access.ts). */
 const itemsFor = (pages?: string[], sitesLabel = 'Sites', extra: Item[] = []) =>
-  (pages ? withPluginItems(extra).filter((i) => pages.includes(i.href)) : withPluginItems(extra)).map((i) => (i.href === '/admin' ? { ...i, label: sitesLabel } : i))
+  (pages ? withPluginItems(extra).filter((i) => pages.includes(i.href)) : withPluginItems(extra)).map((i) => (i.href === '/admin/services' ? { ...i, label: sitesLabel } : i))
 /** The four on the phone tab bar; the rest go under "More". */
-const TABS = ['/admin', '/admin/monitor', '/admin/backups', '/admin/activity']
+const TABS = ['/admin/projects', '/admin/services', '/admin/monitor', '/admin/backups']
 
 const under = (path: string, base: string) => path === base || path.startsWith(`${base}/`)
 const isActive = (item: Item, path: string) =>
-  item.href === '/admin' ? path === '/admin' || (item.also ?? []).some((a) => under(path, a)) : under(path, item.href)
+  under(path, item.href) || (item.also ?? []).some((a) => under(path, a))
 
 function Badge({ item, down }: { item: Item; down: number }) {
   return item.href === '/admin/monitor' && down > 0 ? <em className="nav-count" title={`${down} down`}>{down}</em> : null
@@ -74,7 +74,7 @@ export function TopCrumbs({ sitesLabel, extra }: { sitesLabel?: string; extra?: 
   const sub = path === item.href ? null
     : path === '/admin/clubs/new' ? 'New site'
     : under(path, '/admin/settings/plugins') ? 'Plugins'
-    : item.href === '/admin' ? (sitesLabel === 'Services' ? 'Service' : 'Site')
+    : item.href === '/admin/services' ? (sitesLabel === 'Services' ? 'Service' : 'Site')
     : item.href === '/admin/monitor' ? 'Site'
     : null
   return (

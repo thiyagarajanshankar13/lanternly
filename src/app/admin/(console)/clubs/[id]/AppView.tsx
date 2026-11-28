@@ -97,7 +97,7 @@ export function AppView({ club, can }: { club: Club; can: { operate: boolean; ow
       {busy && <AutoRefresh seconds={5} />}
       <div className="page-head">
         <div>
-          <p className="small" style={{ marginBottom: 4 }}><Link href="/admin">← Sites</Link>{project ? <> · <Link href={`/admin/projects/${project.id}`}>{project.displayName}</Link></> : null}</p>
+          <p className="small" style={{ marginBottom: 4 }}><Link href="/admin/services">← Sites</Link>{project ? <> · <Link href={`/admin/projects/${project.id}`}>{project.displayName}</Link></> : null}</p>
           <h1>{club.displayName} <ClubBadge status={club.status} /> <span className="badge">{img ? 'Image' : 'App'}</span></h1>
           <p className="muted">
             {pub ? <a href={`https://${domains[0]}`} target="_blank" rel="noreferrer">{domains[0]}</a> : <>Inside the project at <span className="mono">{inside}</span>; no web address</>}
