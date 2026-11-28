@@ -88,7 +88,7 @@ export async function clubOperationAction(form: FormData) {
   if (kind === 'retry-create' && !isOwner(admin)) return
   if (hasPendingOperation(club.id)) return
   // A database changes version and starts over from its own page (other wording, other checks).
-  if (club.kind === 'postgres' && (kind === 'upgrade' || kind === 'retry-create')) return
+  if ((club.kind === 'postgres' || club.kind === 'minio') && (kind === 'upgrade' || kind === 'retry-create')) return
   if (kind === 'pause' && club.status === 'running') enqueue(club, 'pause', admin.email)
   else if (kind === 'resume' && club.status === 'paused') enqueue(club, 'resume', admin.email)
   else if (kind === 'https' && (club.status === 'running' || club.status === 'paused') && club.customDomains.length) enqueue(club, 'https', admin.email)
@@ -113,13 +113,13 @@ export async function removeClubAction(_prev: FormState, form: FormData): Promis
   if (!club) return { error: 'That site no longer exists.' }
   if (str(form, 'confirm') !== club.name) return { error: `Type ${club.name} to confirm.` }
   if (hasPendingOperation(club.id)) return { error: 'Wait for the current change to finish first.' }
-  if (club.kind === 'postgres') {
+  if (club.kind === 'postgres' || club.kind === 'minio') {
     const users = appsUsing(club.id)
-    if (users.length) return { error: `${users.map((a) => a.displayName).join(', ')} still ${users.length === 1 ? 'uses' : 'use'} this database. Disconnect ${users.length === 1 ? 'it' : 'them'} in the app's settings first.` }
+    if (users.length) return { error: `${users.map((a) => a.displayName).join(', ')} still ${users.length === 1 ? 'uses' : 'use'} this ${club.kind === 'minio' ? 'storage' : 'database'}. Disconnect ${users.length === 1 ? 'it' : 'them'} in the app's settings first.` }
   }
   if (club.status === 'failed' && form.get('recordOnly') === 'on') {
     deleteClubRow(club.id)
-    redirect('/admin')
+    redirect('/admin/services')
   }
   updateClub(club.id, { status: 'removing' })
   enqueue(getClub(club.id)!, 'remove', admin.email)

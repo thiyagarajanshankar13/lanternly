@@ -138,7 +138,7 @@ export function syncDeployerSites() {
     if (club.kind === 'postgres' || !club.appPublic) { const old = have.get(club.id); if (old) removeWatched(old.id); continue }
     const url = `https://${club.name}.${base}`
     const name = club.displayName || club.name
-    const healthPath = club.kind === 'app' ? club.appHealthPath || '/' : ''
+    const healthPath = club.kind === 'app' ? club.appHealthPath || '/' : club.kind === 'minio' ? '/minio/health/live' : ''
     const row = have.get(club.id)
     if (!row) db().prepare('INSERT INTO watched_sites (name, url, club_id, health_path, created_at) VALUES (?, ?, ?, ?, ?)').run(name, url, club.id, healthPath, now())
     else {

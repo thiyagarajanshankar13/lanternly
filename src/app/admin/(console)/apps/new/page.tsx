@@ -2,7 +2,7 @@ import { requireOwner, requireProject } from '@/lib/guards'
 import { requireAdmin } from '@/lib/auth'
 import { canBuildInProject, isOwner } from '@/lib/access'
 import { listProjects } from '@/lib/projects'
-import { databasesIn } from '@/lib/services'
+import { linkableIn } from '@/lib/services'
 import { ProjectChoice } from '@/components/ProjectChoice'
 import Link from 'next/link'
 import { clubCount, listServers } from '@/lib/clubs'
@@ -26,7 +26,7 @@ export default async function NewAppPage({ searchParams }: { searchParams: Promi
   const serverName = new Map(servers.map((s) => [s.id, s.name]))
   const projects = listProjects().filter((p) => canBuildInProject(admin, p.id)).map((p) => ({
     id: p.id, displayName: p.displayName, server: serverName.get(p.serverId) ?? '',
-    databases: databasesIn(p.id).map((d) => ({ id: d.id, name: d.name, displayName: d.displayName })),
+    databases: linkableIn(p.id).map((d) => ({ id: d.id, name: d.name, displayName: d.displayName, kind: d.kind, buckets: d.s3Buckets.map((b) => b.name) })),
   }))
   const ready = githubConfigured()
   let repos: Repo[] = []
@@ -38,7 +38,7 @@ export default async function NewAppPage({ searchParams }: { searchParams: Promi
     <>
       <div className="page-head">
         <div>
-          <p className="small" style={{ marginBottom: 4 }}>{asked ? <Link href={`/admin/projects/${asked}`}>← Project</Link> : <Link href="/admin">← Sites</Link>}</p>
+          <p className="small" style={{ marginBottom: 4 }}>{asked ? <Link href={`/admin/projects/${asked}`}>← Project</Link> : <Link href="/admin/services">← Sites</Link>}</p>
           <h1>New app</h1>
           <p className="muted">Runs an app from a GitHub repo and branch: it is built on GitHub from the repo&apos;s Dockerfile, started on a sites server and given HTTPS. The first build usually takes one to three minutes. To run a ready-made image from Docker Hub instead, use <Link href={asked ? `/admin/apps/image?project=${asked}` : '/admin/apps/image'}>New service from an image</Link>.</p>
         </div>
@@ -68,7 +68,7 @@ export default async function NewAppPage({ searchParams }: { searchParams: Promi
         </div>
 
         <div className="card">
-          <h2>Project and databases</h2>
+          <h2>Project, databases and storage</h2>
           <ProjectChoice projects={projects} initial={asked || undefined} fixed={!!asked} allowNew={owner} />
         </div>
 

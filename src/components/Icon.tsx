@@ -15,6 +15,7 @@ const PATHS = {
   plus: <path d="M12 5v14M5 12h14" />,
   bell: <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0" />,
   refresh: <path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" />,
+  bucket: <path d="M4 7h16l-1.6 12.3a2 2 0 0 1-2 1.7H7.6a2 2 0 0 1-2-1.7zM3 7l2-3h14l2 3M9 11h6" />,
   db: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></>,
   pause: <><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>,
   play: <path d="M7 4l13 8-13 8z" />,

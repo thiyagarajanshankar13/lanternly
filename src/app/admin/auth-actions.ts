@@ -6,6 +6,7 @@ import {
   acceptInvite, adminCount, checkCode, checkPassword, clientIp, createAdmin, currentAdmin, endSession, findInvite, passwordError, pendingAdmin,
   recordAttempt, startSession, tooManyAttempts,
 } from '@/lib/auth'
+import { homePage } from '@/lib/access'
 import { audit } from '@/lib/audit'
 import { isEmail } from '@/lib/validate'
 
@@ -41,7 +42,7 @@ export async function codeAction(_prev: FormState, form: FormData): Promise<Form
   }
   await startSession(admin.id, true)
   await audit(admin, 'sign-in')
-  redirect('/admin')
+  redirect(homePage(admin))
 }
 
 export async function setupAction(_prev: FormState, form: FormData): Promise<FormState> {

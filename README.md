@@ -11,6 +11,7 @@ A small, self-hosted platform for running web apps and PostgreSQL databases on y
 - give apps HTTPS addresses under your own domain, plus custom domains;
 - group services into projects with a private network each;
 - run PostgreSQL with backups, upgrades and a size quota;
+- give apps S3-compatible bucket storage (MinIO) on their own server;
 - back up to any S3-compatible bucket, encrypted before upload;
 - monitor your sites (and sites hosted anywhere else) with email alerts;
 - give people access per project, as owner, operator or viewer.
@@ -61,6 +62,10 @@ A project groups services on one server, with its own Docker network where each 
 - **Pre-deploy command** (`npm run migrate`) runs once per new version before it takes over.
 - **Quota.** A soft size limit per database with alerts at 80% and 100%, read-only at 100%.
 
+## S3 storage
+
+**New service → S3 storage (MinIO)** gives a project its own S3-compatible storage: one MinIO container per storage, up to 20 buckets, each readable by apps only or by anyone with the link, and an optional HTTPS address for public files and signed links. Tick it in an app's settings under **Databases and storage** and pick a bucket: the app gets `S3_ENDPOINT`, `S3_PUBLIC_URL`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` and `S3_FORCE_PATH_STYLE`, plus the `AWS_*` names AWS SDKs read when there's no prefix. Keys are made on the server and never stored by the deployer; **New keys** rotates them. A soft quota emails at 80% and 100%. Storage is backed up with everything else.
+
 ## Backups
 
 Backups go to any S3-compatible bucket (AWS S3, Lightsail, Backblaze B2, Cloudflare R2, MinIO…), on a schedule per service, before upgrades and restores, and by hand. Everything is encrypted with a backup key before upload; keep that key in a password manager, because losing it means losing the backups. Files are stored once per content. A backup can be restored onto the service or into a copy at a new address. `scripts/backup-tool.mjs` reads the bucket without the deployer.
@@ -103,12 +108,8 @@ npm run typecheck
 - One operation runs at a time across all servers (app builds run on GitHub, outside that queue).
 - Certificates are issued per address (Let's Encrypt allows about 50 new ones a week per registered domain).
 - While a new app version starts, the app is briefly unavailable.
-- Apps have no volumes; data belongs in a database.
+- Apps have no volumes; data belongs in a database or S3 storage.
 - Some internal names (the default folder `/opt/avrosphere`, container prefix `avrosphere`) come from the project this was extracted from. Set `AGENT_ROOT` and `AGENT_NAMESPACE` on a new server to use your own.
-
-## Logo
-
-The lantern mark, logo and app icon are in [`brand/`](brand/). Amber `#fbbf24` (`#d97706` on white), flame gradient `#fde68a` to `#d97706`, wordmark in Space Grotesk Bold.
 
 ## Licence
 
