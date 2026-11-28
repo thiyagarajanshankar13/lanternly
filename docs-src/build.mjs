@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const out = join(here, '..', 'docs')
-const REPO = 'https://github.com/thiyagarajanshankar13/lanternly'
+const REPO = 'https://github.com/avrotech-com-au/lanternly'
 
 // The side menu, in reading order. slug = pages/<slug>.html → docs/<slug>.html
 export const NAV = [
