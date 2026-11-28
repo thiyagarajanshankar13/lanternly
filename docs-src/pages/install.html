@@ -34,7 +34,7 @@ sudo DEPLOYER_DOMAIN=admin.example.com ./setup-deployer-vm.sh</code></pre>
 <li>a one-time <strong>setup code</strong> for the first sign-in. To choose your own, pass <code>DEPLOYER_SETUP_TOKEN</code> (16+ letters and digits) to the script.</li>
 </ul>
 <p>Then start the console. Either build it on the VM:</p>
-<pre><code>git clone https://github.com/thiyagarajanshankar13/lanternly.git
+<pre><code>git clone https://github.com/avrotech-com-au/lanternly.git
 cd lanternly && sudo docker build -t deployer .
 cd /opt/deployer && sudo env DEPLOYER_IMAGE=deployer docker compose up -d</code></pre>
 <p>or let GitHub Actions build and deliver it (see <a href="#deploy-from-github-actions">Deploy from GitHub Actions</a> below).</p>
