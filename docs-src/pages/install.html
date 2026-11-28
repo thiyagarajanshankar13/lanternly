@@ -59,7 +59,7 @@ sudo DEPLOYER_PUBLIC_KEY="ssh-ed25519 AAAA… deployer" \
 <ol class="steps">
 <li>Open <code>https://admin.example.com/admin</code>. The certificate is issued on the first visit, so give it a few seconds.</li>
 <li>Enter the setup code, your name, email and a password (12 characters or more).</li>
-<li>Scan the QR code with an authenticator app and enter the 6-digit code.</li>
+<li>Scan the QR code with an authenticator app and enter the 6-digit code. You land on <strong>Projects</strong>, the console's home page.</li>
 <li>On the deployer VM, remove the <code>DEPLOYER_SETUP_TOKEN</code> line from <code>/opt/deployer/.env</code> and restart: <code>cd /opt/deployer &amp;&amp; sudo docker compose up -d</code>.</li>
 </ol>
 

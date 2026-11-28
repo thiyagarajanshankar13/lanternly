@@ -48,6 +48,7 @@
 <p>Caddy on the same server serves every web address over HTTPS and asks Let's Encrypt for a certificate per address.</p>
 
 <h2 id="projects"><a class="anchor" href="#projects" aria-hidden="true" tabindex="-1">#</a>Projects</h2>
+<p><strong>Projects</strong> is the console's home page: you land there after signing in, and <code>/admin</code> opens it. The flat list of every service is <strong>Services</strong> (<code>/admin/services</code>), just below it in the side menu.</p>
 <p>A project groups the services that make up one product: for example a web app, a worker and a database. Every project runs on one server and has its own Docker network, where each service is reachable by its name (<code>shop-db:5432</code>). Services in one project can't reach services in another.</p>
 <p>Inside a project, the console draws the services as a diagram in three rows:</p>
 <ul>
